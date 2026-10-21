@@ -5,6 +5,7 @@ import sys
 import os
 import re
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -230,8 +231,13 @@ def apply_configuration(keychord, launch_args, unbind_conflicts=False):
     if norm:
         if unbind_conflicts:
             block_lines.append(f'hl.unbind("{norm}")')
-        safe_cmd = cmd.replace('\\', '').replace('"', "")
-        block_lines.append(f'hl.bind("{norm}", hl.dsp.exec("{safe_cmd}"), {{ desc = "LumineCapture: {safe_cmd}" }})')
+        # Omarchy/Hyprland Lua exposes hl.dsp.exec_cmd / hl.dsp.exec_raw; there is no hl.dsp.exec.
+        # Launch through uwsm-app when present so the app gets a systemd scope, like Omarchy's own bindings.
+        launch_cmd = cmd
+        if shutil.which("uwsm-app"):
+            launch_cmd = "uwsm-app -- " + cmd
+        safe_cmd = launch_cmd.replace('\\', '').replace('"', "")
+        block_lines.append(f'hl.bind("{norm}", hl.dsp.exec_cmd("{safe_cmd}"), {{ description = "LumineCapture: {cmd}", dont_inhibit = true }})')
     block_lines.append(f"-- END {PLUGIN_ID}")
     block_lines.append("")
     new_content = cleaned + "\n" + "\n".join(block_lines)
