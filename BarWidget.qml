@@ -139,6 +139,11 @@ BarWidget {
       root.isInstalling = false
       checkInstalledProc.running = true
     }
+    function openRecorder(): void { settingsPopup.openRecorder() }
+    function themeInfo(): string {
+      return JSON.stringify({ theme: config.themeName, status: config.themeStatus })
+    }
+    function syncTheme(): void { config.syncTheme(true) }
   }
 
   Component.onCompleted: {

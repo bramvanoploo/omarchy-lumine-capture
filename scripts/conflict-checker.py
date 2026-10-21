@@ -163,10 +163,12 @@ def get_current_status():
 
 
 def sanitize_args(raw):
+    # What the launchers can carry into a Hyprland exec command: plain text,
+    # single quotes (Omarchy's own quoting for paths with spaces), no escapes.
     raw = (raw or "").strip()
     if not raw:
         return ""
-    if not re.fullmatch(r"[A-Za-z0-9 ._+=/@%:,~-]*", raw):
+    if not re.fullmatch(r"[A-Za-z0-9 ._+=/@%:,'~-]*", raw):
         return ""
     return raw
 
@@ -226,6 +228,9 @@ def apply_configuration(keychord, launch_args, unbind_conflicts=False):
 
     BINDINGS_LUA.parent.mkdir(parents=True, exist_ok=True)
     existing = BINDINGS_LUA.read_text(encoding="utf-8") if BINDINGS_LUA.exists() else ""
+    # What the block says now, if the plugin has written one before.
+    live = re.search(r"-- BEGIN " + re.escape(PLUGIN_ID) + r".*?-- END " + re.escape(PLUGIN_ID), existing, flags=re.DOTALL)
+    live_block = live.group(0) if live else None
     cleaned = re.sub(r"\n*-- BEGIN " + re.escape(PLUGIN_ID) + r".*?-- END " + re.escape(PLUGIN_ID) + r"\n*", "\n", existing, flags=re.DOTALL).strip()
     block_lines = ["", f"-- BEGIN {PLUGIN_ID}"]
     if norm:
@@ -240,6 +245,13 @@ def apply_configuration(keychord, launch_args, unbind_conflicts=False):
         block_lines.append(f'hl.bind("{norm}", hl.dsp.exec_cmd("{safe_cmd}"), {{ description = "LumineCapture: {cmd}", dont_inhibit = true }})')
     block_lines.append(f"-- END {PLUGIN_ID}")
     block_lines.append("")
+    # The plugin re-applies the shortcut at shell start to keep it in step with
+    # the launch options. Rewriting the user's hyprland config and reloading the
+    # compositor on every start, for a block that already says this, is not a
+    # start-up side effect worth having, so an unchanged block is left alone.
+    new_block = "\n".join(block_lines[1:-1])
+    if live_block is not None and "\n".join(live_block.splitlines()) == new_block:
+        return {"success": True, "unchanged": True, "message": "Keybinding already runs this command."}
     new_content = cleaned + "\n" + "\n".join(block_lines)
     try:
         temp_binding = BINDINGS_LUA.with_suffix(f".tmp.{os.getpid()}")

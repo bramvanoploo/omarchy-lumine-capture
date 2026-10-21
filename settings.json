@@ -1,4 +1,12 @@
 {
   "keybinding": "SUPER + SHIFT + S",
-  "launchArgs": ""
+  "mode": "",
+  "monitor": false,
+  "delay": "",
+  "to": "",
+  "toNothing": false,
+  "output": "",
+  "nonotify": false,
+  "ocrDaemon": "",
+  "extraArgs": ""
 }

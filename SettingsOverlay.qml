@@ -1,9 +1,10 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
-import "LumineConfig.js" as LC
+import "LaunchArgs.js" as LaunchArgs
 
 PopupCard {
   id: root
@@ -12,50 +13,91 @@ PopupCard {
   property bool isInstalled: false
 
   property string currentKeybinding: ""
-  property string launchArgs: ""
+
+  // Mirrors of the launch options in ConfigManager, edited here and written
+  // back one at a time.
+  property string mode: ""
+  property bool monitor: false
+  property string delay: ""
+  property string to: ""
+  property bool toNothing: false
+  property string output: ""
+  property bool nonotify: false
+  property string ocrDaemon: ""
+
+  property var toSelection: []
+  property string zenityPath: ""
+  property bool ocrBusy: false
+  property string pendingOcrAction: ""
+
   property bool suggestedKeyConflict: false
   property string suggestedKeyConflictMessage: ""
-  property var keySuggestions: []
   property string statusText: ""
 
-  // Key recording dialog
+  // Record-key dialog (OmaGuake style): recording, live conflict check,
+  // suggested alternatives, and take-over of a conflicting binding.
   property bool recordingDialogOpen: false
   property string recordedChord: ""
+  property bool recordedConflict: false
+  property string recordedConflictMessage: ""
+  property var recordedSuggestions: []
   property bool isCheckingRecordedKey: false
 
-  // Conflict resolution
-  property bool conflictDialogOpen: false
-  property string conflictMessage: ""
-  property var conflictSuggestions: []
-  property string pendingChord: ""
-
-  // LumineCapture config model
-  property var sections: []
-  property int configRev: 0
-  property var collapsed: ({})
-  readonly property string configPath: (Quickshell.env("HOME") || "") + "/.config/LumineCapture/config.toml"
-
   padding: Style.space(20)
-  contentWidth: fittedContentWidth(Style.space(560))
-  contentHeight: fittedContentHeight(contentCol.implicitHeight)
+  contentWidth: fittedContentWidth(Style.space(520))
+  // The record dialog is a modal inside the card, so the card must grow to fit it.
+  contentHeight: fittedContentHeight(Math.max(
+    contentCol.implicitHeight,
+    recordingDialogOpen ? recordCol.implicitHeight + Style.space(40) : 0
+  ))
 
   onOpenChanged: {
     if (open) {
       loadCurrentSettings()
       refreshStatus()
-      configView.reload()
       statusText = ""
+      checkZenityProc.running = true
     } else {
       recordingDialogOpen = false
-      conflictDialogOpen = false
     }
   }
 
+  // The launch options decide what the global shortcut runs, and they can move
+  // without the panel being involved: settings.json edited by hand, an upgrade
+  // that adds options, a hyprland config reset. So the shortcut is re-applied a
+  // moment after start. conflict-checker.py leaves the file untouched when the
+  // block already runs this command, so a start with nothing to fix leaves the
+  // compositor alone.
+  Component.onCompleted: reapplyTimer.restart()
+
   function loadCurrentSettings() {
-    if (configManager) {
-      currentKeybinding = configManager.keybinding || ""
-      launchArgs = configManager.launchArgs || ""
+    if (!configManager) return
+    currentKeybinding = configManager.keybinding || ""
+    mode = configManager.mode || ""
+    monitor = configManager.monitor === true
+    delay = configManager.delay || ""
+    to = configManager.to || ""
+    toNothing = configManager.toNothing === true
+    output = configManager.output || ""
+    nonotify = configManager.nonotify === true
+    ocrDaemon = configManager.ocrDaemon || ""
+    toSelection = to.split("")
+  }
+
+  // The launch options LumineCapture will be started with.
+  readonly property string launchArgs: configManager ? configManager.launchArgs : ""
+  readonly property var launchWarnings: configManager ? configManager.launchWarnings : []
+  readonly property string modeHint: {
+    for (var i = 0; i < LaunchArgs.MODES.length; i++) {
+      if (LaunchArgs.MODES[i].value === mode) return LaunchArgs.MODES[i].hint
     }
+    return ""
+  }
+  readonly property string daemonHint: {
+    for (var i = 0; i < LaunchArgs.DAEMON_ACTIONS.length; i++) {
+      if (LaunchArgs.DAEMON_ACTIONS[i].value === ocrDaemon) return LaunchArgs.DAEMON_ACTIONS[i].hint
+    }
+    return ""
   }
 
   function refreshStatus() {
@@ -64,8 +106,15 @@ PopupCard {
     statusProc.running = true
   }
 
-
-
+  function openRecorder() {
+    recordedChord = ""
+    recordedConflict = false
+    recordedConflictMessage = ""
+    recordedSuggestions = []
+    isCheckingRecordedKey = false
+    recordingDialogOpen = true
+    Qt.callLater(function() { recordKeyCatcher.forceActiveFocus() })
+  }
 
   function checkRecordedKey(chord) {
     if (!configManager || !chord) return
@@ -76,62 +125,84 @@ PopupCard {
 
   function applyBinding(chord, unbind) {
     if (!configManager) return
-    applyProc.command = [configManager.conflictCheckerScript, "apply", chord || "", launchArgs, unbind ? "true" : "false"]
+    currentKeybinding = chord
+    configManager.saveSettings({ keybinding: chord })
+    applyProc.command = [configManager.conflictCheckerScript, "apply", chord || "", configManager.launchArgs, unbind ? "true" : "false"]
     applyProc.running = true
   }
 
-  function setKeybinding(chord) {
-    currentKeybinding = chord
-    if (configManager) configManager.saveSettings({ keybinding: chord })
-    applyBinding(chord, false)
+  // Write one option, then let the global keybinding pick it up. The exec
+  // command in bindings.lua is a fixed string, so it is rewritten once the
+  // typing settles.
+  function saveOption(key, value) {
+    if (!configManager) return
+    var patch = {}
+    patch[key] = value
+    configManager.saveSettings(patch)
+    loadCurrentSettings()
+    if (key !== "keybinding") reapplyTimer.restart()
   }
 
-  function saveLaunchArgs() {
-    if (configManager) configManager.saveSettings({ launchArgs: launchArgs })
-    // Re-apply the binding so the exec command picks up the new args
-    if (currentKeybinding) applyBinding(currentKeybinding, false)
+  // Rewrite the shortcut so it runs the command the options add up to. The chord
+  // comes from the settings, not from the panel's copy of it: this runs at shell
+  // start too, before the panel has ever been opened.
+  function reapplyKeybinding() {
+    if (!configManager) return
+    var chord = (configManager.keybinding || "").trim()
+    if (chord === "" || chord.toLowerCase() === "none") return
+    applyProc.command = [configManager.conflictCheckerScript, "apply", chord, configManager.launchArgs, "false"]
+    applyProc.running = true
   }
 
-  function takeOverChord() {
-    applyBinding(pendingChord, true)
+  function saveToLetters(values) {
+    var letters = LaunchArgs.toLetters(values)
+    to = letters
+    saveOption("to", letters)
   }
 
-  // ---------- LumineCapture config ----------
-
-  function reloadConfigModel() {
-    var raw = configView.text()
-    if (!raw) { sections = []; return }
-    sections = LC.parse(raw)
-    configRev++
+  function setDelayText(text) {
+    delay = text
+    saveOption("delay", text)
   }
 
-
-  function saveConfig() {
-    configView.setText(LC.serialize(sections) + "\n")
-    statusText = "LumineCapture configuration saved."
+  function browseOutput() {
+    if (!zenityPath) return
+    var start = configManager ? configManager.expandedOutput : ""
+    browseProc.command = [zenityPath, "--file-selection", "--directory",
+                          "--title=Where should the shots be saved?",
+                          "--filename=" + (start || (Quickshell.env("HOME") || "/")) + "/"]
+    browseProc.running = true
   }
 
-  function toggleSection(name) {
-    var c = Object.assign({}, collapsed)
-    c[name] = !c[name]
-    collapsed = c
+  // serve outlives the panel, so it goes out detached; the rest answer on
+  // stdout, which lands in the status line.
+  function runOcrDaemon(action) {
+    if (!configManager || ocrBusy) return
+    if (action === "serve") {
+      Quickshell.execDetached(["lumine-capture", "--ocr-daemon", "serve"])
+      statusText = "OCR daemon: serving in the background."
+      return
+    }
+    ocrBusy = true
+    pendingOcrAction = action
+    statusText = action === "calibrate"
+        ? "OCR daemon: measuring this machine, a few seconds\u2026"
+        : "OCR daemon: " + action + "\u2026"
+    ocrProc.command = ["lumine-capture", "--ocr-daemon", action]
+    ocrProc.running = true
   }
 
-  function commitItem(item, text) { LC.applyVal(item, text); saveConfig() }
-
+  function resetOptions() {
+    if (!configManager) return
+    configManager.resetOptions()
+    loadCurrentSettings()
+    statusText = "Launch options cleared: the app's own settings decide."
+    reapplyTimer.restart()
+  }
 
   // ---------- key chord recorder ----------
 
-  function modList(m) {
-    var mods = []
-    if (m & Qt.MetaModifier) mods.push("SUPER")
-    if (m & Qt.ControlModifier) mods.push("CTRL")
-    if (m & Qt.ShiftModifier) mods.push("SHIFT")
-    if (m & Qt.AltModifier) mods.push("ALT")
-    return mods
-  }
-
-  function keyName(k) {
+  function recordedKeyStr(k, text) {
     if (k >= Qt.Key_A && k <= Qt.Key_Z) return String.fromCharCode(k)
     if (k >= Qt.Key_0 && k <= Qt.Key_9) return String.fromCharCode(k)
     if (k >= Qt.Key_F1 && k <= Qt.Key_F12) return "F" + (k - Qt.Key_F1 + 1)
@@ -144,546 +215,521 @@ PopupCard {
     map[Qt.Key_Grave] = "GRAVE"; map[Qt.Key_Minus] = "MINUS"; map[Qt.Key_Equal] = "EQUAL"
     map[Qt.Key_Comma] = "COMMA"; map[Qt.Key_Period] = "PERIOD"; map[Qt.Key_Slash] = "SLASH"
     map[Qt.Key_Semicolon] = "SEMICOLON"; map[Qt.Key_Apostrophe] = "APOSTROPHE"; map[Qt.Key_Backslash] = "BACKSLASH"
-    return map[k] || ""
+    if (map[k]) return map[k]
+    if (text && text.length === 1 && text.trim().length > 0) return text.toUpperCase()
+    return ""
   }
 
-  Column {
-    id: contentCol
+  // The launch options make the panel taller than a laptop screen, so it scrolls.
+  Flickable {
+    id: scroller
     width: parent.width
-    spacing: Style.space(14)
+    height: parent.height
+    contentWidth: width
+    contentHeight: contentCol.implicitHeight
+    clip: true
+    boundsBehavior: Flickable.StopAtBounds
 
-  Process {
-    id: statusProc
-    command: ["true"]
-    stdout: StdioCollector { id: statusOut }
-    onExited: function(code) {
-      try {
-        var s = JSON.parse(statusOut.text)
-        suggestedKeyConflict = s.suggested_key_conflict === true
-        suggestedKeyConflictMessage = s.suggested_key_conflict_message || ""
-        keySuggestions = s.key_suggestions || []
-      } catch (e) {}
-    }
-  }
-  Process {
-    id: keyCheckProc
-    command: ["true"]
-    stdout: StdioCollector { id: keyCheckOut }
-    onExited: function(code) {
-      root.isCheckingRecordedKey = false
-      var res = null
-      try { res = JSON.parse(keyCheckOut.text) } catch (e) {}
-      if (res && res.conflict) {
-        conflictMessage = res.message || "Keybinding is already in use."
-        conflictSuggestions = res.suggestions || []
-        pendingChord = root.recordedChord
-        conflictDialogOpen = true
-      } else {
-        applyBinding(root.recordedChord, false)
-      }
-    }
-  }
-  Process {
-    id: applyProc
-    command: ["true"]
-    stdout: StdioCollector { id: applyOut }
-    onExited: function(code) {
-      var res = null
-      try { res = JSON.parse(applyOut.text) } catch (e) {}
-      if (res && res.success) {
-        conflictDialogOpen = false
-        statusText = "Keybinding applied."
-        refreshStatus()
-      } else {
-        statusText = (res && res.error) ? res.error : "Applying keybinding failed."
-      }
-    }
-  }
-  FileView {
-    id: configView
-    path: root.configPath
-    watchChanges: true
-    atomicWrites: true
-    printErrors: false
-    onLoaded: root.reloadConfigModel()
-    onLoadFailed: { root.sections = []; root.configRev++ }
-    onFileChanged: reload()
-  }
-  Process {
-    id: defaultsProc
-    command: ["lumine-capture", "--print-default-config"]
-    stdout: StdioCollector { id: defaultsOut }
-    onExited: function(code) {
-      if (code === 0 && defaultsOut.text) {
-        sections = LC.parse(defaultsOut.text)
-        configRev++
-        saveConfig()
-      } else {
-        statusText = "Could not read LumineCapture defaults."
-      }
-    }
-  }
-
-    // ===== Header =====
-    Row {
+    Column {
+      id: contentCol
       width: parent.width
       spacing: Style.space(10)
 
-      Text {
-        text: "\uf030"
-        color: Color.accent
-        font.family: Style.font.family
-        font.pixelSize: Style.font.heading * 1.1
-        anchors.verticalCenter: parent.verticalCenter
-      }
+      // ---------- background jobs ----------
 
-      Column {
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 1
-
-        Text {
-          text: "OmaLumineCapture"
-          color: Color.foreground
-          font.family: Style.font.family
-          font.pixelSize: Style.font.heading
-          font.weight: Font.DemiBold
-        }
-
-        Text {
-          text: "v" + (configManager ? configManager.version : "") + (root.isInstalled ? "" : "  \u00b7  app not installed")
-          color: root.isInstalled ? Util.alpha(Color.foreground, 0.5) : Color.accent
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
+      Process {
+        id: statusProc
+        command: ["true"]
+        stdout: StdioCollector { id: statusOut }
+        onExited: function(code) {
+          try {
+            var s = JSON.parse(statusOut.text)
+            suggestedKeyConflict = s.suggested_key_conflict === true
+            suggestedKeyConflictMessage = s.suggested_key_conflict_message || ""
+          } catch (e) {}
         }
       }
 
-      Item { width: Style.space(1); height: 1; anchors.verticalCenter: parent.verticalCenter }
-
-      Item {
-        width: parent.width - childrenRect.width - Style.space(11)
-        height: 1
-      }
-
-      BorderSurface {
-        width: Style.space(26)
-        height: Style.space(26)
-        radius: Style.cornerRadius > 0 ? 4 : 0
-        color: closeMa.containsMouse ? Util.alpha(Color.foreground, 0.12) : "transparent"
-        anchors.verticalCenter: parent.verticalCenter
-
-        Text {
-          anchors.centerIn: parent
-          text: "\uf00d"
-          color: Util.alpha(Color.foreground, 0.7)
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-        }
-
-        MouseArea {
-          id: closeMa
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.open = false
-        }
-      }
-    }
-
-    // ===== Capture section =====
-    Text {
-      text: "CAPTURE"
-      color: Util.alpha(Color.foreground, 0.45)
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-      font.weight: Font.Bold
-    }
-
-    Row {
-      width: parent.width
-      spacing: Style.space(8)
-
-      Text {
-        width: Style.space(150)
-        text: "Keybinding"
-        color: Color.foreground
-        font.family: Style.font.family
-        font.pixelSize: Style.font.bodySmall
-        anchors.verticalCenter: parent.verticalCenter
-      }
-
-      BorderSurface {
-        implicitWidth: Math.max(kbText.implicitWidth + Style.space(20), Style.space(150))
-        implicitHeight: Style.space(28)
-        color: Util.alpha(Color.foreground, 0.06)
-        borderSpec: Border.flat(Util.alpha(Color.foreground, 0.18), Style.normalBorderWidth)
-        radius: Style.cornerRadius > 0 ? 4 : 0
-        anchors.verticalCenter: parent.verticalCenter
-
-        Text {
-          id: kbText
-          anchors.centerIn: parent
-          text: root.currentKeybinding ? root.currentKeybinding : "(none)"
-          color: root.currentKeybinding ? Color.foreground : Util.alpha(Color.foreground, 0.5)
-          font.family: Style.font.family
-          font.pixelSize: Style.font.bodySmall
+      Process {
+        id: keyCheckProc
+        command: ["true"]
+        stdout: StdioCollector { id: keyCheckOut }
+        onExited: function(code) {
+          root.isCheckingRecordedKey = false
+          var res = null
+          try { res = JSON.parse(keyCheckOut.text) } catch (e) {}
+          if (!res) return
+          root.recordedConflict = res.conflict === true
+          root.recordedConflictMessage = res.message || ""
+          root.recordedSuggestions = res.suggestions || []
         }
       }
 
-      Item { width: Style.space(1); height: 1 }
-
-      BorderSurface {
-        implicitWidth: recText.implicitWidth + Style.space(20)
-        implicitHeight: Style.space(28)
-        color: recMa.containsMouse ? Color.accent : Util.alpha(Color.accent, 0.85)
-        borderSpec: Border.flat(Color.accent, Style.normalBorderWidth)
-        radius: Style.cornerRadius > 0 ? 4 : 0
-        anchors.verticalCenter: parent.verticalCenter
-
-        Text {
-          id: recText
-          anchors.centerIn: parent
-          text: "Record\u2026"
-          color: Color.background || "#0c0d13"
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          font.weight: Font.Bold
-        }
-
-        MouseArea {
-          id: recMa
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: {
-            root.recordingDialogOpen = true
-            root.recordedChord = ""
-            Qt.callLater(function() { recorderCatcher.forceActiveFocus() })
+      Process {
+        id: applyProc
+        command: ["true"]
+        stdout: StdioCollector { id: applyOut }
+        onExited: function(code) {
+          var res = null
+          try { res = JSON.parse(applyOut.text) } catch (e) {}
+          if (res && res.success) {
+            root.recordingDialogOpen = false
+            root.statusText = root.currentKeybinding
+              ? "Keybinding applied: " + root.currentKeybinding
+              : "Keybinding removed."
+            refreshStatus()
+          } else {
+            root.statusText = (res && res.error) ? res.error : "Applying keybinding failed."
           }
         }
       }
 
-      BorderSurface {
-        implicitWidth: clrText.implicitWidth + Style.space(20)
-        implicitHeight: Style.space(28)
-        color: clrMa.containsMouse ? Util.alpha(Color.foreground, 0.12) : "transparent"
-        borderSpec: Border.flat(Util.alpha(Color.foreground, 0.3), Style.normalBorderWidth)
-        radius: Style.cornerRadius > 0 ? 4 : 0
-        anchors.verticalCenter: parent.verticalCenter
-
-        Text {
-          id: clrText
-          anchors.centerIn: parent
-          text: "Clear"
-          color: Color.foreground
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-        }
-
-        MouseArea {
-          id: clrMa
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: { root.currentKeybinding = ""; if (configManager) configManager.saveSettings({ keybinding: "" }); applyBinding("", false) }
-        }
-      }
-    }
-
-    Text {
-      visible: root.suggestedKeyConflict && suggestedKeyConflictMessage !== ""
-      width: parent.width
-      text: "\u26a0 " + suggestedKeyConflictMessage
-      color: Color.accent
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-      wrapMode: Text.WordWrap
-    }
-
-    Row {
-      width: parent.width
-      spacing: Style.space(8)
-
-      Text {
-        width: Style.space(150)
-        text: "Launch arguments"
-        color: Color.foreground
-        font.family: Style.font.family
-        font.pixelSize: Style.font.bodySmall
-        anchors.verticalCenter: parent.verticalCenter
+      // Typing in the delay, output path or extra arguments settles before the
+      // keybinding is rewritten: one hyprctl reload for the whole edit, not one
+      // per keystroke.
+      Timer {
+        id: reapplyTimer
+        interval: 900
+        onTriggered: root.reapplyKeybinding()
       }
 
-      BorderSurface {
-        width: parent.width - Style.space(158)
-        implicitHeight: Style.space(28)
-        color: Util.alpha(Color.foreground, 0.06)
-        borderSpec: Border.flat(Util.alpha(Color.foreground, 0.18), Style.normalBorderWidth)
-        radius: Style.cornerRadius > 0 ? 4 : 0
-        anchors.verticalCenter: parent.verticalCenter
-
-        TextField {
-          id: argsField
-          anchors.fill: parent
-          anchors.leftMargin: Style.space(8)
-          anchors.rightMargin: Style.space(8)
-          text: root.launchArgs
-          placeholderText: "e.g. -r -t sc  (empty = editor)"
-          color: Color.foreground
-          font.family: Style.font.family
-          font.pixelSize: Style.font.bodySmall
-          onAccepted: { root.launchArgs = text; root.saveLaunchArgs() }
-          onActiveFocusChanged: if (!activeFocus) { root.launchArgs = text; root.saveLaunchArgs() }
-        }
-      }
-    }
-
-    // ===== LumineCapture config section =====
-    Row {
-      width: parent.width
-      spacing: Style.space(8)
-
-      Text {
-        text: "LUMINECAPTURE CONFIG"
-        color: Util.alpha(Color.foreground, 0.45)
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-        font.weight: Font.Bold
-        anchors.verticalCenter: parent.verticalCenter
+      Process {
+        id: checkZenityProc
+        command: ["bash", "-c", "command -v zenity"]
+        stdout: StdioCollector { id: zenityOut }
+        onExited: function(code) { root.zenityPath = code === 0 ? zenityOut.text.trim() : "" }
       }
 
-      Item { width: Style.space(1); height: 1 }
-
-      BorderSurface {
-        implicitWidth: dftText.implicitWidth + Style.space(16)
-        implicitHeight: Style.space(24)
-        color: dftMa.containsMouse ? Util.alpha(Color.foreground, 0.12) : "transparent"
-        borderSpec: Border.flat(Util.alpha(Color.foreground, 0.3), Style.normalBorderWidth)
-        radius: Style.cornerRadius > 0 ? 4 : 0
-        anchors.verticalCenter: parent.verticalCenter
-
-        Text {
-          id: dftText
-          anchors.centerIn: parent
-          text: "Restore defaults"
-          color: Color.foreground
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-        }
-
-        MouseArea {
-          id: dftMa
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: { if (!defaultsProc.running) defaultsProc.running = true }
+      Process {
+        id: browseProc
+        command: ["true"]
+        stdout: StdioCollector { id: browseOut }
+        onExited: function(code) {
+          var picked = browseOut.text.trim()
+          if (code === 0 && picked !== "") root.saveOption("output", picked)
         }
       }
-    }
 
-    Text {
-      width: parent.width
-      text: root.sections.length === 0
-            ? "No LumineCapture config found yet (" + root.configPath + "). It appears after the app's first launch, or press \"Restore defaults\"."
-            : "Editing a field saves " + root.configPath + " immediately (applied on next launch)."
-      color: Util.alpha(Color.foreground, 0.5)
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-      wrapMode: Text.WordWrap
-    }
+      Process {
+        id: ocrProc
+        command: ["true"]
+        stdout: StdioCollector { id: ocrOut }
+        stderr: StdioCollector { id: ocrErr }
+        onExited: function(code) {
+          root.ocrBusy = false
+          var out = (ocrOut.text + " " + ocrErr.text).trim().replace(/\n+/g, " ")
+          var action = root.pendingOcrAction
+          root.pendingOcrAction = ""
+          root.statusText = "OCR daemon " + action + ": " + (out || "(no output, exit " + code + ")")
+        }
+      }
 
-    Flickable {
-      width: parent.width
-      height: Math.min(configList.implicitHeight + Style.space(8), Style.space(420))
-      contentHeight: configList.implicitHeight + Style.space(8)
-      clip: true
-      boundsBehavior: Flickable.StopAtBounds
-      visible: root.sections.length > 0
-
-      Column {
-        id: configList
+      // ===== Header =====
+      Row {
         width: parent.width
-        spacing: Style.space(6)
-
-        Repeater {
-          model: root.sections
-
-          Column {
-            width: parent.width
-            spacing: Style.space(4)
-
-            property var sec: modelData
-            property bool isCollapsed: !!root.collapsed[modelData.name]
-
-            BorderSurface {
-              width: parent.width
-              implicitHeight: Style.space(26)
-              color: secHeadMa.containsMouse ? Util.alpha(Color.foreground, 0.06) : "transparent"
-              borderSpec: Border.flat(Util.alpha(Color.foreground, 0.12), Style.normalBorderWidth)
-              radius: Style.cornerRadius > 0 ? 4 : 0
-
-              Row {
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(8)
-                spacing: Style.space(8)
-
-                Text {
-                  text: sec.isCollapsed ? "\uf054" : "\uf078"
-                  color: Util.alpha(Color.foreground, 0.6)
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-
-                Text {
-                  text: sec.name
-                  color: Color.accent
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  font.weight: Font.Bold
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-              }
-
-              MouseArea {
-                id: secHeadMa
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.toggleSection(sec.name)
-              }
-            }
-
-            Column {
-              width: parent.width
-              spacing: Style.space(4)
-              visible: !sec.isCollapsed
-
-              Repeater {
-                model: sec.items
-
-                Row {
-                  width: configList.width
-                  spacing: Style.space(8)
-
-                  property var item: modelData
-
-                  Text {
-                    width: Style.space(150)
-                    text: modelData.key
-                    color: Util.alpha(Color.foreground, 0.8)
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    elide: Text.ElideRight
-                    anchors.verticalCenter: parent.verticalCenter
-                  }
-
-                  // Boolean toggle
-                  BorderSurface {
-                    visible: item.kind === "bool"
-                    width: Style.space(36)
-                    height: Style.space(20)
-                    radius: 10
-                    color: item.val ? Color.accent : Util.alpha(Color.foreground, 0.15)
-                    borderSpec: Border.flat(item.val ? Color.accent : Util.alpha(Color.foreground, 0.25), Style.normalBorderWidth)
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    Rectangle {
-                      width: Style.space(14)
-                      height: Style.space(14)
-                      radius: 7
-                      color: Color.background || "#0c0d13"
-                      y: 3
-                      x: item.val ? 36 - 14 - 3 : 3
-                      Behavior on x { NumberAnimation { duration: 120 } }
-                    }
-
-                    MouseArea {
-                      anchors.fill: parent
-                      cursorShape: Qt.PointingHandCursor
-                      onClicked: { item.val = !item.val; root.saveConfig(); root.configRev++ }
-                    }
-                  }
-
-                  // Value field (num / str / arr)
-                  BorderSurface {
-                    visible: item.kind !== "bool"
-                    width: configList.width - Style.space(166)
-                    implicitHeight: Style.space(24)
-                    color: Util.alpha(Color.foreground, 0.05)
-                    borderSpec: Border.flat(Util.alpha(Color.foreground, 0.15), Style.normalBorderWidth)
-                    radius: Style.cornerRadius > 0 ? 3 : 0
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    TextField {
-                      anchors.fill: parent
-                      anchors.leftMargin: Style.space(6)
-                      anchors.rightMargin: Style.space(6)
-                      text: LC.displayVal(item)
-                      color: Color.foreground
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      onAccepted: root.commitItem(item, text)
-                      onActiveFocusChanged: if (!activeFocus) root.commitItem(item, text)
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // ===== Status =====
-    Text {
-      visible: root.statusText !== ""
-      width: parent.width
-      text: root.statusText
-      color: Color.accent
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-      wrapMode: Text.WordWrap
-    }
-
-    // ===== Recording overlay (inside the card) =====
-    Rectangle {
-      anchors.fill: parent
-      visible: root.recordingDialogOpen
-      color: Util.alpha(Color.background, 0.9)
-      radius: Style.cornerRadius
-
-      Column {
-        anchors.centerIn: parent
-        spacing: Style.space(12)
+        spacing: Style.space(10)
 
         Text {
-          text: "Press your key combination"
-          color: Color.foreground
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-          font.weight: Font.DemiBold
-        }
-
-        Text {
-          text: root.recordedChord ? root.recordedChord : "\u2014"
+          text: "\uf030"
           color: Color.accent
           font.family: Style.font.family
-          font.pixelSize: Style.font.heading
-          font.weight: Font.Bold
+          font.pixelSize: Style.font.heading * 1.1
+          anchors.verticalCenter: parent.verticalCenter
         }
 
-        Text {
-          text: "Esc \u00b7 cancel"
-          color: Util.alpha(Color.foreground, 0.5)
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
+        Column {
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: 1
+
+          Text {
+            text: "OmaLumineCapture"
+            color: Color.foreground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.heading
+            font.weight: Font.DemiBold
+          }
+
+          Text {
+            text: "v" + (configManager ? configManager.version : "") + (root.isInstalled ? "" : "  \u00b7  app not installed")
+            color: root.isInstalled ? Color.muted : Color.accent
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+        }
+
+        Item { width: Style.space(1); height: 1; anchors.verticalCenter: parent.verticalCenter }
+
+        Item {
+          width: parent.width - childrenRect.width - Style.space(11)
+          height: 1
+        }
+
+        BorderSurface {
+          width: Style.space(26)
+          height: Style.space(26)
+          radius: Style.cornerRadius > 0 ? 4 : 0
+          color: closeMa.containsMouse ? Util.alpha(Color.foreground, 0.12) : "transparent"
+          anchors.verticalCenter: parent.verticalCenter
+
+          Text {
+            anchors.centerIn: parent
+            text: "\uf00d"
+            color: Util.alpha(Color.foreground, 0.7)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+
+          MouseArea {
+            id: closeMa
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.open = false
+          }
         }
       }
 
+      // ===== Keybinding =====
+      PanelSeparator {
+        foreground: bar.foreground
+      }
+
+      PanelSectionHeader {
+        text: "KEYBINDING"
+        foreground: bar.foreground
+        fontFamily: bar.fontFamily
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+
+        BorderSurface {
+          implicitWidth: Math.max(kbText.implicitWidth + Style.space(20), Style.space(150))
+          implicitHeight: Style.space(28)
+          color: Util.alpha(Color.foreground, 0.06)
+          borderSpec: Border.flat(Util.alpha(Color.foreground, 0.18), Style.normalBorderWidth)
+          radius: Style.cornerRadius > 0 ? 4 : 0
+          anchors.verticalCenter: parent.verticalCenter
+
+          Text {
+            id: kbText
+            anchors.centerIn: parent
+            text: root.currentKeybinding ? root.currentKeybinding : "(none)"
+            color: root.currentKeybinding ? Color.foreground : Color.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+          }
+        }
+
+        Item { width: Style.space(1); height: 1 }
+
+        Button {
+          text: root.currentKeybinding ? "Record\u2026" : "Record shortcut\u2026"
+          fontSize: Style.font.caption
+          tooltipText: root.currentKeybinding
+            ? "Record a new shortcut (current: " + root.currentKeybinding + ")"
+            : "Record a global shortcut for starting a capture"
+          onClicked: root.openRecorder()
+        }
+
+        Button {
+          visible: !!root.currentKeybinding
+          text: "Clear"
+          fontSize: Style.font.caption
+          tooltipText: "Remove the global shortcut"
+          onClicked: root.applyBinding("", false)
+        }
+      }
+
+      Text {
+        visible: root.suggestedKeyConflict && suggestedKeyConflictMessage !== ""
+        width: parent.width
+        text: "\u26a0 " + suggestedKeyConflictMessage
+        color: Color.accent
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      // ===== Launch options: one control per lumine-capture flag =====
+
+      PanelSeparator {
+        foreground: bar.foreground
+      }
+
+      PanelSectionHeader {
+        text: "LAUNCH OPTIONS"
+        foreground: bar.foreground
+        fontFamily: bar.fontFamily
+      }
+
+      // Grouped by the kind of control: picks, then fields, then switches.
+
+      // ===== Picks =====
+
+      // Mode decides what the shot is, and it is what people set by hand.
+      FormRow {
+        label: "Mode"
+
+        Dropdown {
+          id: modeDrop
+          width: Math.min(parent.controlWidth, Style.space(250))
+          showLabel: false
+          foreground: Color.foreground
+          accent: Color.accent
+          options: LaunchArgs.MODES
+          anchors.verticalCenter: parent.verticalCenter
+          Binding { target: modeDrop; property: "value"; value: root.mode }
+          onChanged: function(next) {
+            root.mode = next
+            root.saveOption("mode", next)
+          }
+        }
+      }
+
+      HintText { text: root.modeHint }
+
+      FormRow {
+        label: "Send to"
+
+        MultiSelect {
+          id: toSelect
+          width: Math.min(parent.controlWidth, Style.space(330))
+          showLabel: false
+          foreground: Color.foreground
+          accent: Color.accent
+          placeholderText: "Choose what to do with the shot"
+          noSelectionText: "App default"
+          options: LaunchArgs.TO_OPTIONS
+          anchors.verticalCenter: parent.verticalCenter
+          Binding { target: toSelect; property: "values"; value: root.toSelection }
+          onChanged: function(values) { root.saveToLetters(values) }
+        }
+      }
+
+      HintText { text: "What to do with the shot. Left on its own, the app's own choice is used." }
+
+      FormRow {
+        label: "OCR daemon"
+
+        Dropdown {
+          id: daemonDrop
+          width: Math.min(parent.controlWidth, Style.space(250))
+          showLabel: false
+          foreground: Color.foreground
+          accent: Color.accent
+          options: LaunchArgs.DAEMON_ACTIONS
+          anchors.verticalCenter: parent.verticalCenter
+          Binding { target: daemonDrop; property: "value"; value: root.ocrDaemon }
+          onChanged: function(next) {
+            root.ocrDaemon = next
+            root.saveOption("ocrDaemon", next)
+          }
+        }
+      }
+
+      FormRow {
+        label: "Run now"
+
+        Repeater {
+          model: ["serve", "status", "stop", "calibrate"]
+
+          Button {
+            text: modelData
+            fontSize: Style.font.caption
+            enabled: !root.ocrBusy
+            opacity: enabled ? 1.0 : 0.4
+            tooltipText: "Run this daemon action on the OCR engine right now"
+            onClicked: root.runOcrDaemon(modelData)
+          }
+        }
+      }
+
+      HintText { text: root.daemonHint }
+
+      // ===== Fields =====
+
+      FormRow {
+        label: "Delay"
+
+        TextField {
+          id: delayField
+          width: Style.space(84)
+          text: root.delay
+          placeholderText: "none"
+          horizontalPadding: Style.space(8)
+          verticalPadding: Style.space(4)
+          font.pixelSize: Style.font.bodySmall
+          foreground: Color.foreground
+          accent: Color.accent
+          validator: RegularExpressionValidator { regularExpression: /^\d{1,4}([.,]\d{1,2})?$/ }
+          // Typing takes the binding over, so the value comes back by Binding.
+          Binding { target: delayField; property: "text"; value: root.delay }
+          // Only write back a field the person actually edited: the popup
+          // stealing focus away must not save the text that the Binding put there.
+          property bool editedHere: false
+          onAccepted: root.setDelayText(text)
+          onActiveFocusChanged: {
+            if (activeFocus) editedHere = true
+            else if (editedHere) { editedHere = false; root.setDelayText(text) }
+          }
+          anchors.verticalCenter: parent.verticalCenter
+        }
+
+        Repeater {
+          model: ["0.5", "1", "3", "10"]
+
+          Button {
+            text: modelData + "s"
+            fontSize: Style.font.caption
+            tooltipText: "Delay the shot " + modelData + " seconds"
+            onClicked: { delayField.text = modelData; root.setDelayText(modelData) }
+          }
+        }
+
+        Button {
+          visible: root.delay !== ""
+          text: "Clear"
+          fontSize: Style.font.caption
+          tooltipText: "Take the shot straight away"
+          onClicked: { delayField.text = ""; root.setDelayText("") }
+        }
+      }
+
+      HintText { text: "Seconds between launching and taking the shot. Empty takes it straight away." }
+
+      FormRow {
+        label: "Output folder"
+
+        TextField {
+          id: outputField
+          width: Math.max(Style.space(120), parent.controlWidth - browseButton.implicitWidth - Style.space(8))
+          text: root.output
+          placeholderText: "the app's own screenshots folder"
+          horizontalPadding: Style.space(8)
+          verticalPadding: Style.space(4)
+          font.pixelSize: Style.font.bodySmall
+          foreground: Color.foreground
+          accent: Color.accent
+          // No shell metacharacters: the path goes to bash -c and to a Hyprland exec.
+          validator: RegularExpressionValidator { regularExpression: /^[^"'`$\\|<>;\n\r]*$/ }
+          Binding { target: outputField; property: "text"; value: root.output }
+          property bool editedHere: false
+          onAccepted: root.setOutputText(text)
+          onActiveFocusChanged: {
+            if (activeFocus) editedHere = true
+            else if (editedHere) { editedHere = false; root.setOutputText(text) }
+          }
+          anchors.verticalCenter: parent.verticalCenter
+        }
+
+        Button {
+          id: browseButton
+          text: "Browse\u2026"
+          fontSize: Style.font.caption
+          enabled: root.zenityPath !== ""
+          tooltipText: root.zenityPath !== "" ? "Pick a folder" : "Needs zenity for a folder picker"
+          onClicked: root.browseOutput()
+          anchors.verticalCenter: parent.verticalCenter
+        }
+      }
+
+      HintText { text: "Saved shots go here, created if missing. A folder here also saves the shot, even when Save is not ticked." }
+
+      // ===== Switches =====
+
+      Toggle {
+        width: parent.width
+        label: "Only the monitor under the pointer"
+        description: "Capture the screen the pointer sits on, instead of every screen."
+        titleSize: Style.font.bodySmall
+        checked: root.monitor
+        onClicked: { root.monitor = !root.monitor; root.saveOption("monitor", root.monitor) }
+      }
+
+      Toggle {
+        width: parent.width
+        label: "Nothing happens when you finish"
+        description: "Finishing a shot does nothing unless you choose, whatever the app's own setting says."
+        titleSize: Style.font.bodySmall
+        checked: root.toNothing
+        onClicked: { root.toNothing = !root.toNothing; root.saveOption("toNothing", root.toNothing) }
+      }
+
+      Toggle {
+        width: parent.width
+        label: "No notifications for this launch"
+        description: "Skip the \u201csaved\u201d, \u201ccopied\u201d and OCR outcome notifications."
+        titleSize: Style.font.bodySmall
+        checked: root.nonotify
+        onClicked: { root.nonotify = !root.nonotify; root.saveOption("nonotify", root.nonotify) }
+      }
+
+      // What the combination cannot do, in the app's own words.
+      Text {
+        visible: text !== ""
+        width: parent.width
+        text: root.launchWarnings.join("\n")
+        color: Color.accent
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      Button {
+        text: "Clear launch options"
+        fontSize: Style.font.caption
+        tooltipText: "Back to what LumineCapture's own config.toml decides"
+        onClicked: root.resetOptions()
+      }
+
+      // ===== Status =====
+      Text {
+        visible: root.statusText !== ""
+        width: parent.width
+        text: root.statusText
+        color: Color.accent
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+  }
+
+  // =========================================================================
+  // MODAL: Record shortcut dialog with live conflict check and resolution
+  // (structure follows OmaGuake's "Record custom shortcut" modal)
+  // =========================================================================
+  Rectangle {
+    id: recordModalScrim
+    visible: root.recordingDialogOpen
+    anchors.fill: parent
+    color: Qt.rgba(0, 0, 0, 0.7)
+    radius: Style.cornerRadius
+    z: 100
+
+    MouseArea {
+      anchors.fill: parent
+      onClicked: {} // swallow clicks
+    }
+
+    Rectangle {
+      id: recordCard
+      width: parent.width - Style.space(32)
+      height: recordCol.implicitHeight + Style.space(32)
+      anchors.centerIn: parent
+      radius: Style.cornerRadius
+      color: Color.background
+      border.color: Color.accent
+      border.width: 1
+
+      // Key catcher
       Item {
-        id: recorderCatcher
+        id: recordKeyCatcher
         anchors.fill: parent
         focus: root.recordingDialogOpen
+        Keys.priority: Keys.BeforeItem
 
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
@@ -691,137 +737,241 @@ PopupCard {
             event.accepted = true
             return
           }
-          var isMod = event.key === Qt.Key_Meta || event.key === Qt.Key_Control ||
-                      event.key === Qt.Key_Shift || event.key === Qt.Key_Alt ||
+
+          var mods = []
+          if (event.modifiers & Qt.ControlModifier) mods.push("CTRL")
+          if (event.modifiers & Qt.AltModifier) mods.push("ALT")
+          if (event.modifiers & Qt.MetaModifier) mods.push("SUPER")
+          if (event.modifiers & Qt.ShiftModifier) mods.push("SHIFT")
+
+          var isMod = event.key === Qt.Key_Control || event.key === Qt.Key_Alt ||
+                      event.key === Qt.Key_Meta || event.key === Qt.Key_Shift ||
                       event.key === Qt.Key_Super || event.key === Qt.Key_NumLock
-          var mods = modList(event.modifiers)
+          var keyStr = isMod ? "" : root.recordedKeyStr(event.key, event.text)
+
           if (isMod) {
             root.recordedChord = mods.join(" + ")
-          } else {
-            var kn = keyName(event.key)
-            if (kn) {
-              root.recordedChord = (mods.length ? mods.join(" + ") + " + " : "") + kn
-              root.recordingDialogOpen = false
-              root.checkRecordedKey(root.recordedChord)
-            }
+            event.accepted = true
+          } else if (keyStr) {
+            var chord = (mods.length > 0 ? mods.join(" + ") + " + " : "") + keyStr
+            root.recordedChord = chord
+            root.checkRecordedKey(chord)
+            event.accepted = true
           }
-          event.accepted = true
         }
       }
-    }
-
-    // ===== Conflict resolution overlay (inside the card) =====
-    Rectangle {
-      anchors.fill: parent
-      visible: root.conflictDialogOpen
-      color: Util.alpha(Color.background, 0.94)
-      radius: Style.cornerRadius
 
       Column {
-        anchors.centerIn: parent
-        width: parent.width - Style.space(48)
-        spacing: Style.space(12)
+        id: recordCol
+        anchors.fill: parent
+        anchors.margins: Style.space(16)
+        spacing: Style.space(14)
 
         Text {
-          text: "Keybinding conflict"
+          text: "Record shortcut"
+          font.family: Style.font.family
+          font.pixelSize: Style.font.heading
+          font.bold: true
           color: Color.foreground
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-          font.weight: Font.DemiBold
         }
 
-        Text {
-          text: root.conflictMessage
-          color: Util.alpha(Color.foreground, 0.7)
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          wrapMode: Text.WordWrap
-        }
+        // Recording display box
+        Rectangle {
+          width: parent.width
+          height: 60
+          radius: Style.cornerRadius > 0 ? 6 : 0
+          color: Util.alpha(Color.accent, 0.08)
+          border.color: Color.accent
+          border.width: 1
 
-        Repeater {
-          model: root.conflictSuggestions
-
-          BorderSurface {
-            width: parent.width
-            implicitHeight: Style.space(30)
-            color: sugMa.containsMouse ? Util.alpha(Color.accent, 0.18) : Util.alpha(Color.accent, 0.08)
-            borderSpec: Border.flat(Util.alpha(Color.accent, 0.4), Style.normalBorderWidth)
-            radius: Style.cornerRadius > 0 ? 4 : 0
+          Row {
+            anchors.centerIn: parent
+            spacing: Style.space(8)
 
             Text {
-              anchors.centerIn: parent
-              text: "Use " + modelData + " instead"
+              text: root.recordedChord ? "\uf11c" : "\uf111"
+              font.family: Style.font.family
+              font.pixelSize: Style.font.title
               color: Color.accent
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              font.weight: Font.Medium
+              anchors.verticalCenter: parent.verticalCenter
             }
 
-            MouseArea {
-              id: sugMa
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: { root.conflictDialogOpen = false; root.setKeybinding(modelData) }
+            Text {
+              text: root.recordedChord ? root.recordedChord : "Press your key combination"
+              font.family: Style.font.family
+              font.pixelSize: root.recordedChord ? Style.font.heading : Style.font.body
+              font.bold: !!root.recordedChord
+              color: root.recordedChord ? Color.foreground : Color.muted
+              anchors.verticalCenter: parent.verticalCenter
             }
           }
         }
 
-        Row {
-          spacing: Style.space(10)
-          anchors.right: parent.right
+        // Live conflict / availability status
+        Rectangle {
+          visible: !!root.recordedChord
+          width: parent.width
+          height: recStatusText.implicitHeight + Style.space(16)
+          radius: Style.cornerRadius > 0 ? 4 : 0
+          color: root.recordedConflict ? Util.alpha(Color.urgent, 0.15) : Util.alpha(Color.accent, 0.15)
+          border.color: root.recordedConflict ? Color.urgent : Color.accent
+          border.width: 1
 
-          BorderSurface {
-            implicitWidth: tkText.implicitWidth + Style.space(18)
-            implicitHeight: Style.space(30)
-            color: tkMa.containsMouse ? Color.accent : Util.alpha(Color.accent, 0.85)
-            radius: Style.cornerRadius > 0 ? 4 : 0
+          Row {
+            anchors.fill: parent
+            anchors.margins: Style.space(8)
+            spacing: Style.space(8)
 
             Text {
-              id: tkText
-              anchors.centerIn: parent
-              text: "Take over (disable conflicting binding)"
-              color: Color.background || "#0c0d13"
+              text: root.recordedConflict ? "\uf071" : "\uf00c"
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              font.weight: Font.Bold
+              font.pixelSize: Style.font.body
+              color: root.recordedConflict ? Color.urgent : Color.accent
+              anchors.verticalCenter: parent.verticalCenter
             }
 
-            MouseArea {
-              id: tkMa
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.takeOverChord()
+            Text {
+              id: recStatusText
+              width: parent.width - Style.space(32)
+              text: root.isCheckingRecordedKey
+                    ? "Checking for conflicts\u2026"
+                    : (root.recordedConflict
+                       ? root.recordedConflictMessage
+                       : root.recordedChord + " is free")
+              textFormat: Text.PlainText
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+              color: root.recordedConflict ? Color.urgent : Color.foreground
+              anchors.verticalCenter: parent.verticalCenter
             }
           }
+        }
 
-          BorderSurface {
-            implicitWidth: cxText.implicitWidth + Style.space(18)
-            implicitHeight: Style.space(30)
-            color: cxMa.containsMouse ? Util.alpha(Color.foreground, 0.12) : "transparent"
-            borderSpec: Border.flat(Util.alpha(Color.foreground, 0.3), Style.normalBorderWidth)
-            radius: Style.cornerRadius > 0 ? 4 : 0
+        // Suggested conflict-free alternatives
+        Column {
+          visible: root.recordedConflict && root.recordedSuggestions.length > 0
+          width: parent.width
+          spacing: Style.space(6)
 
-            Text {
-              id: cxText
-              anchors.centerIn: parent
-              text: "Cancel"
-              color: Color.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+          Text {
+            text: "Conflict-free alternatives"
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            color: Color.foreground
+          }
+
+          Row {
+            spacing: Style.space(6)
+
+            Repeater {
+              model: root.recordedSuggestions
+
+              Button {
+                text: modelData
+                fontSize: Style.font.caption
+                tooltipText: "Use " + modelData + " instead"
+                onClicked: {
+                  root.recordedChord = modelData
+                  root.checkRecordedKey(modelData)
+                }
+              }
             }
+          }
+        }
 
-            MouseArea {
-              id: cxMa
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.conflictDialogOpen = false
+        // Take over the conflicting binding
+        Row {
+          visible: root.recordedConflict
+          width: parent.width
+          spacing: Style.space(8)
+
+          Text {
+            text: "The key is bound elsewhere."
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            color: Color.muted
+            anchors.verticalCenter: parent.verticalCenter
+          }
+
+          Button {
+            text: "Take over (disable conflicting binding)"
+            fontSize: Style.font.caption
+            tooltipText: "Comment out the conflicting Hyprland binding and assign this key to LumineCapture"
+            onClicked: {
+              root.applyBinding(root.recordedChord, true)
+              root.recordingDialogOpen = false
             }
+          }
+        }
+
+        // Actions
+        Row {
+          anchors.right: parent.right
+          spacing: Style.spacing.sm
+
+          Button {
+            id: recCancelBtn
+            width: Math.max(recApplyBtn.implicitWidth, Style.space(120))
+            text: "Cancel"
+            onClicked: root.recordingDialogOpen = false
+          }
+
+          Button {
+            id: recApplyBtn
+            width: Math.max(implicitWidth, Style.space(120))
+            text: "Apply"
+            selected: true
+            enabled: !!root.recordedChord && !root.recordedConflict && !root.isCheckingRecordedKey
+            opacity: enabled ? 1.0 : 0.4
+            onClicked: root.applyBinding(root.recordedChord, false)
           }
         }
       }
     }
+  }
+
+  // =========================================================================
+  // Inline pieces: a label column with controls beside it, a section header,
+  // and the line of explanation under a control.
+  // =========================================================================
+
+  component FormRow: Row {
+    id: formRow
+    width: parent.width
+    spacing: Style.space(8)
+
+    property string label: ""
+
+    // Children go into the controls column, not into the row itself.
+    default property alias controls: controlsColumn.data
+
+    Text {
+      id: labelColumn
+      width: Style.space(150)
+      text: formRow.label
+      color: Color.foreground
+      font.family: Style.font.family
+      font.pixelSize: Style.font.bodySmall
+      anchors.verticalCenter: parent.verticalCenter
+    }
+
+    Row {
+      id: controlsColumn
+      spacing: Style.space(8)
+      // Room left for the control, once the label column is off. Callers read
+      // this as `parent.controlWidth` from inside the row.
+      readonly property int controlWidth: formRow.width - labelColumn.width - formRow.spacing
+      anchors.verticalCenter: parent.verticalCenter
+    }
+  }
+
+  component HintText: Text {
+    width: parent.width
+    color: Color.muted
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
   }
 }
