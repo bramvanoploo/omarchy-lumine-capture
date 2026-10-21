@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "bramvanoploo.omarchy-lumine-capture",
+  "name": "OmaLumineCapture",
+  "version": "0.1.0",
+  "author": "Bram van Oploo",
+  "license": "MIT",
+  "description": "LumineCapture integration for Omarchy: bar launcher with automatic AUR dependency installation, conflict-checked global keybinding, and a full configuration panel for LumineCapture",
+  "kinds": [
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaLumineCapture",
+    "description": "LumineCapture launcher with AUR auto-install, keybinding and configuration",
+    "category": "Utilities",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "keybinding": "SUPER + SHIFT + S",
+      "launchArgs": ""
+    },
+    "schema": [
+      {
+        "key": "keybinding",
+        "type": "string",
+        "label": "Capture keybinding",
+        "description": "Global shortcut chord to start a LumineCapture session. Empty disables the binding."
+      },
+      {
+        "key": "launchArgs",
+        "type": "string",
+        "label": "Launch arguments",
+        "description": "Arguments passed to lumine-capture (e.g. '-r -t sc'). Empty opens the editor."
+      }
+    ]
+  }
+}
