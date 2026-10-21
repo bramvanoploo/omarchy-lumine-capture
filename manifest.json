@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "id": "bramvanoploo.omarchy-lumine-capture",
+  "name": "OmaLumineCapture",
+  "version": "0.2.0",
+  "author": "Bram van Oploo",
+  "license": "MIT",
+  "description": "LumineCapture integration for Omarchy: bar launcher with automatic AUR dependency installation, conflict-checked global keybinding, and a full configuration panel for LumineCapture",
+  "kinds": [
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaLumineCapture",
+    "description": "LumineCapture launcher with AUR auto-install, keybinding and configuration",
+    "category": "Utilities",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "keybinding": "SUPER + SHIFT + S",
+      "mode": "",
+      "monitor": false,
+      "delay": "",
+      "to": "",
+      "toNothing": false,
+      "output": "",
+      "nonotify": false,
+      "ocrDaemon": ""
+    },
+    "schema": [
+      {
+        "key": "keybinding",
+        "type": "string",
+        "label": "Capture keybinding",
+        "description": "Global shortcut chord to start a LumineCapture session. Empty disables the binding."
+      },
+      {
+        "key": "mode",
+        "type": "enum",
+        "label": "Mode",
+        "description": "What the launch captures. Empty opens the editor.",
+        "defaultValue": "",
+        "options": [
+          {
+            "value": "",
+            "label": "Editor (no mode)"
+          },
+          {
+            "value": "full",
+            "label": "Full screen"
+          },
+          {
+            "value": "window",
+            "label": "Active window"
+          },
+          {
+            "value": "region",
+            "label": "Region"
+          },
+          {
+            "value": "region-ocr",
+            "label": "Region OCR"
+          }
+        ]
+      },
+      {
+        "key": "monitor",
+        "type": "boolean",
+        "label": "Only the monitor under the pointer",
+        "description": "Capture the screen the pointer is on, instead of every screen.",
+        "defaultValue": false
+      },
+      {
+        "key": "delay",
+        "type": "string",
+        "label": "Delay (seconds)",
+        "description": "Take the shot this long after the launch, e.g. 3 or 0.5. Empty takes it straight away.",
+        "defaultValue": ""
+      },
+      {
+        "key": "to",
+        "type": "multiselect",
+        "label": "Send to",
+        "description": "What to do with the shot. Empty keeps the app's own choice.",
+        "defaultValue": [],
+        "noSelectionText": "App default",
+        "options": [
+          {
+            "value": "c",
+            "label": "Copy",
+            "description": "put the image on the clipboard"
+          },
+          {
+            "value": "p",
+            "label": "Pin",
+            "description": "keep the shot on screen"
+          },
+          {
+            "value": "s",
+            "label": "Save",
+            "description": "write it to the output folder"
+          },
+          {
+            "value": "o",
+            "label": "Stdout",
+            "description": "hand the PNG to a command on stdout"
+          },
+          {
+            "value": "r",
+            "label": "Primary selection",
+            "description": "the middle-click target, only Region OCR acts on it"
+          }
+        ]
+      },
+      {
+        "key": "toNothing",
+        "type": "boolean",
+        "label": "Nothing happens when you finish",
+        "description": "Finishing a shot does nothing unless you choose, whatever the app's own setting says.",
+        "defaultValue": false
+      },
+      {
+        "key": "output",
+        "type": "path",
+        "label": "Output folder",
+        "description": "Save the shots here, created if missing. A folder here also saves the shot, even when Save is not ticked.",
+        "defaultValue": ""
+      },
+      {
+        "key": "nonotify",
+        "type": "boolean",
+        "label": "No notifications for this launch",
+        "description": "Skip the saved / copied / OCR outcome notifications.",
+        "defaultValue": false
+      },
+      {
+        "key": "ocrDaemon",
+        "type": "enum",
+        "label": "OCR daemon",
+        "description": "Run the background OCR engine instead of a capture.",
+        "defaultValue": "",
+        "options": [
+          {
+            "value": "",
+            "label": "Not on launch"
+          },
+          {
+            "value": "serve",
+            "label": "serve",
+            "description": "Keep a ready engine in the background"
+          },
+          {
+            "value": "status",
+            "label": "status",
+            "description": "Report whether the daemon is running"
+          },
+          {
+            "value": "stop",
+            "label": "stop",
+            "description": "Stop the background daemon"
+          },
+          {
+            "value": "calibrate",
+            "label": "calibrate",
+            "description": "Measure this machine and pick CPU or GPU"
+          }
+        ]
+      }
+    ]
+  }
+}
