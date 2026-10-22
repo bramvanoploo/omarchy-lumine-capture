@@ -9,7 +9,7 @@ QtObject {
 
   property string pluginDir: ""
   readonly property string homeDir: Quickshell.env("HOME") || ""
-  property string version: "0.1.0"
+  property string version: "0.2.0"
   readonly property string pluginId: "bramvanoploo.omarchy-lumine-capture"
   readonly property string configPath: (homeDir ? homeDir : "~") + "/.config/omarchy/plugins/" + pluginId + "/settings.json"
   readonly property string conflictCheckerScript: pluginDir + "/scripts/conflict-checker.py"
