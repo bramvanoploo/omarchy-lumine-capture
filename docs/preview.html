@@ -1,0 +1,299 @@
+<!doctype html>
+<!--
+  preview.png template for the Omarchy LumineCapture plugin.
+  Render with: scripts/render-preview.sh
+  Placeholders replaced by that script: __VERSION__ __ACCENT__ __ACCENT_RGB__
+  __FG__ __FG_RGB__ __DARK_FG__ __BG__ __DARK_BG__
+  Real screenshots live next to this file: shot-panel.png and shot-wallpaper.jpg.
+  .cache-desktop.png (wallpaper + bar strip, composed at render time).
+-->
+<meta charset="utf-8">
+<style>
+  :root {
+    --accent: __ACCENT__;
+    --accent-rgb: __ACCENT_RGB__;
+    --fg: __FG__;
+    --fg-rgb: __FG_RGB__;
+    --dark-fg: __DARK_FG__;
+    --bg: __BG__;
+    --dark-bg: __DARK_BG__;
+    --mono: 'JetBrainsMono Nerd Font', monospace;
+    --sans: 'Gabar Sans', 'Inter', 'Noto Sans', sans-serif;
+  }
+
+  * { margin: 0; box-sizing: border-box; }
+
+  html, body { width: 1920px; height: 1080px; overflow: hidden; }
+
+  body {
+    position: relative;
+    background:
+      radial-gradient(1100px 620px at 74% 16%, rgba(var(--accent-rgb), 0.13), transparent 62%),
+      radial-gradient(760px 520px at 12% 88%, rgba(var(--accent-rgb), 0.06), transparent 65%),
+      linear-gradient(160deg, #0a1017 0%, var(--bg) 58%, var(--dark-bg) 100%);
+    font-family: var(--sans);
+    color: var(--fg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* blueprint grid, the Omarchy plugin-card backdrop */
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(var(--fg-rgb), 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(var(--fg-rgb), 0.045) 1px, transparent 1px);
+    background-size: 96px 96px;
+    mask-image: radial-gradient(1200px 800px at 62% 42%, #000 20%, transparent 92%);
+  }
+
+  /* ---------- identity ---------- */
+  .badge {
+    position: absolute; left: 60px; top: 58px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .pill {
+    font-family: var(--mono); font-size: 13px; letter-spacing: 2.6px;
+    padding: 9px 16px; border-radius: 999px;
+  }
+  .pill.plugin {
+    color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.11);
+    border: 1px solid rgba(var(--accent-rgb), 0.42);
+  }
+  .pill.version {
+    color: var(--dark-fg);
+    background: rgba(var(--fg-rgb), 0.035);
+    border: 1px solid rgba(var(--fg-rgb), 0.16);
+  }
+
+  .title {
+    position: absolute; left: 60px; top: 108px;
+    display: flex; align-items: center; gap: 22px;
+  }
+  .mark {
+    width: 76px; height: 76px; border-radius: 20px;
+    background: linear-gradient(155deg, rgba(var(--accent-rgb), 0.34), rgba(var(--accent-rgb), 0.08));
+    border: 1px solid rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 0 34px rgba(var(--accent-rgb), 0.28);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .title h1 {
+    font-size: 58px; font-weight: 700; letter-spacing: -1.6px;
+    color: var(--fg);
+  }
+  .lede {
+    position: absolute; left: 60px; top: 210px; width: 560px;
+    font-size: 21px; line-height: 1.5; color: rgba(var(--fg-rgb), 0.66);
+  }
+  .lede b { color: var(--fg); font-weight: 600; }
+
+  /* ---------- feature cards ---------- */
+  .cards {
+    position: absolute; left: 60px; top: 344px; width: 600px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .card {
+    display: flex; gap: 16px; padding: 17px 20px;
+    background: linear-gradient(180deg, rgba(var(--fg-rgb), 0.035), rgba(var(--fg-rgb), 0.015));
+    border: 1px solid rgba(var(--fg-rgb), 0.09);
+    border-radius: 14px;
+  }
+  .icon {
+    flex: 0 0 38px; height: 38px; border-radius: 11px;
+    background: rgba(var(--accent-rgb), 0.13);
+    border: 1px solid rgba(var(--accent-rgb), 0.34);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .card h3 {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 19px; font-weight: 600; letter-spacing: -0.2px;
+    color: var(--fg); margin-bottom: 7px;
+  }
+  .tag {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 1.6px;
+    color: var(--accent); background: rgba(var(--accent-rgb), 0.12);
+    border-radius: 999px; padding: 4px 10px;
+  }
+  .card p {
+    font-size: 15px; line-height: 1.5; color: rgba(var(--fg-rgb), 0.55);
+  }
+  .card p code {
+    font-family: var(--mono); font-size: 13.5px;
+    color: rgba(var(--accent-rgb), 0.92);
+  }
+
+  /* ---------- screenshots ---------- */
+  .label {
+    position: absolute; display: flex; align-items: baseline; gap: 12px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 2px;
+    color: rgba(var(--fg-rgb), 0.42);
+  }
+  .label .key { color: var(--accent); letter-spacing: 1.4px; }
+
+  .hero-label { left: 712px; top: 62px; }
+
+  .hero-note {
+    position: absolute; left: 712px; top: 812px; width: 700px;
+    font-family: var(--sans); font-size: 14px; line-height: 1.5;
+    color: rgba(var(--fg-rgb), 0.5);
+  }
+  .hero {
+    position: absolute; left: 712px; top: 96px; width: 1148px; height: 646px;
+    border-radius: 16px; overflow: hidden;
+    border: 1px solid rgba(var(--fg-rgb), 0.14);
+    box-shadow: 0 26px 64px rgba(0, 0, 0, 0.62);
+  }
+  .hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* region selection: dim everything outside the marquee */
+  .marquee {
+    position: absolute; left: 292px; top: 148px; width: 526px; height: 358px;
+    box-shadow: 0 0 0 1400px rgba(2, 4, 8, 0.56);
+    border: 2px solid var(--accent);
+  }
+  .marquee::before, .marquee::after {
+    content: ''; position: absolute; width: 11px; height: 11px;
+    background: var(--accent);
+  }
+  .marquee::before { left: -6px; top: -6px; }
+  .marquee::after { right: -6px; bottom: -6px; }
+  .handle-tr, .handle-bl {
+    position: absolute; width: 11px; height: 11px; background: var(--accent);
+  }
+  .handle-tr { right: -6px; top: -6px; }
+  .handle-bl { left: -6px; bottom: -6px; }
+  .size {
+    position: absolute; left: 0; top: -38px;
+    font-family: var(--mono); font-size: 14px; letter-spacing: 0.5px;
+    color: var(--fg); background: rgba(2, 4, 8, 0.82);
+    border: 1px solid rgba(var(--accent-rgb), 0.42);
+    border-radius: 7px; padding: 6px 11px;
+  }
+
+  .label.chip {
+    padding: 6px 11px; border-radius: 8px; opacity: 1;
+    background: rgba(3, 6, 11, 0.78);
+    border: 1px solid rgba(var(--accent-rgb), 0.32);
+  }
+  .label.chip .key { font-size: 12px; }
+
+  /* the settings panel floats over the region-selection shot, top edge under
+     the marquee, right edge aligned with it, bottom edge near the card floor */
+  .panel-label { left: 1480px; top: 386px; }
+  .panel {
+    position: absolute; left: 1480px; top: 430px; width: 380px; z-index: 5;
+    border-radius: 12px; overflow: hidden;
+    border: 1px solid rgba(var(--accent-rgb), 0.34);
+    box-shadow: 0 22px 52px rgba(0, 0, 0, 0.6);
+    background: rgba(8, 12, 18, 0.9);
+  }
+  .panel img { width: 100%; display: block; }
+
+  .footer {
+    position: absolute; left: 60px; bottom: 40px;
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.6px;
+    color: rgba(var(--fg-rgb), 0.55);
+  }
+  .footer span { color: rgba(var(--accent-rgb), 0.66); }
+</style>
+
+<div class="grid"></div>
+
+<div class="badge">
+  <div class="pill plugin">OMARCHY PLUGIN</div>
+  <div class="pill version">v__VERSION__</div>
+</div>
+
+<div class="title">
+  <div class="mark">
+    <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="__ACCENT__" stroke-width="1.7"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 8.5A2 2 0 0 1 5 6.5h1.6l1.2-2h6.4l1.2 2H19a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+      <circle cx="12" cy="13" r="3.6"/>
+    </svg>
+  </div>
+  <h1>LumineCapture</h1>
+</div>
+
+<div class="lede">
+  Screenshot launcher for Omarchy. The bar icon and the global shortcut run
+  <b>the same command</b> — set up in plain words, not argument strings.
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="__ACCENT__" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M7 10.5h.01M11 10.5h.01M15 10.5h.01M7 14h10"/>
+      </svg>
+    </div>
+    <div>
+      <h3>Global keybinding <span class="tag">SUPER + SHIFT + S</span></h3>
+      <p>Record any chord in the panel. It is written to <code>bindings.lua</code> with conflict detection, and stays in sync with the widget.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="__ACCENT__" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/><path d="M13 7h8M17 3v8"/>
+      </svg>
+    </div>
+    <div>
+      <h3>Capture modes <span class="tag">5 MODES</span></h3>
+      <p>Region, active window, full screen, region OCR, or leave it to the app. The panel previews what the shortcut will do.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="__ACCENT__" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8.5 7.5H6A2.5 2.5 0 0 0 3.5 10v7A2.5 2.5 0 0 0 6 19.5h7A2.5 2.5 0 0 0 15.5 17v-2.5"/><rect x="8.5" y="4.5" width="12" height="12" rx="2.5"/>
+      </svg>
+    </div>
+    <div>
+      <h3>Send to <span class="tag">CLIPBOARD · PIN · SAVE</span></h3>
+      <p>Choose what happens when you finish the shot: clipboard, pin on screen, folder, stdout. Or nothing at all.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="__ACCENT__" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><path d="M4 10h16"/><path d="M12 12.5v4"/>
+      </svg>
+    </div>
+    <div>
+      <h3>OCR daemon <span class="tag">TESSERACT</span></h3>
+      <p>Serve, stop, calibrate, check status — from the panel. It tells you when the daemon has to be restarted to pick up changes.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="__ACCENT__" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3.2a8.8 8.8 0 1 0 0 17.6c1.4 0 2.3-.9 2.3-2 0-1.6-1.6-1.8-1.6-3.1 0-1.1.9-1.9 2-1.9h1.6a4.5 4.5 0 0 0 4.5-4.5C20.8 5.6 16.9 3.2 12 3.2z"/><circle cx="7.6" cy="11.4" r="1.1" fill="__ACCENT__"/><circle cx="11" cy="7.4" r="1.1" fill="__ACCENT__"/><circle cx="15.6" cy="8.4" r="1.1" fill="__ACCENT__"/>
+      </svg>
+    </div>
+    <div>
+      <h3>Theme sync <span class="tag">AUTOMATIC</span></h3>
+      <p>The app's overlay colours follow the Omarchy theme, so the selection matches the bar. Colours, not wallpaper.</p>
+    </div>
+  </div>
+</div>
+
+<div class="label hero-label">REGION CAPTURE <span class="key">SUPER + SHIFT + S</span></div>
+<div class="hero">
+  <img src="shot-wallpaper.jpg" alt="Desktop with a region selected">
+  <div class="marquee">
+    <div class="handle-tr"></div>
+    <div class="handle-bl"></div>
+    <div class="size">-340, 120 · 780 × 560</div>
+  </div>
+</div>
+
+<div class="hero-note">The dim, the marquee and the size read-out are LumineCapture's own overlay, tinted by the Omarchy theme.</div>
+
+<div class="label chip panel-label">CONFIG PANEL <span class="key">RIGHT CLICK</span></div>
+<div class="panel"><img src="shot-panel.png" alt="LumineCapture settings panel"></div>
+
+<div class="footer">MIT License <span>·</span> Built for Omarchy Linux with Quickshell + Hyprland</div>
