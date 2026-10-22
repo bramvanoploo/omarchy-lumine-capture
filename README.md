@@ -16,7 +16,7 @@ No manual setup required: clicking the bar icon will guide you through installin
 
 - **Status bar icon** (camera). **Left-click** starts a capture; **right-click** opens the configuration panel.
 - **Automatic dependency install**: if `lumine-capture-bin` (AUR) is not installed, a confirmation dialog offers to install it. If the AUR helper `yay` is missing, it is explained and installed first. Installation runs in a terminal with `--noconfirm`.
-- **Global keybinding** (default `SUPER + SHIFT + S`, temporary default) with conflict checking against Hyprland bindings: on conflict, pick a suggested free chord or take over (the conflicting binding is disabled with a comment).
+- **Global keybindings, one per capture mode, no shipped default**: you record your own chords in Settings after installing. Conflict checking against Hyprland bindings: on conflict, pick a suggested free chord or take over (the conflicting binding is disabled with a comment).
 - **Right-click settings panel**: keybinding (record, clear, conflict resolution) and a control for every launch option below.
 - **Theme sync**: LumineCapture's colors follow the Omarchy theme you have selected, and are rewritten when the theme changes.
 
@@ -35,14 +35,14 @@ act on.
 | Nothing happens when you finish | `-t` bare | Overrides `general.to`: finishing without an explicit choice does nothing. |
 | Output folder | `-o <DIR>` | Created if missing, and implies `s`. `~` is expanded so the global keybinding, which runs without a shell, gets the same path as the bar icon. |
 | No notifications for this launch | `-n` | The app's `[notifications]` setting is left alone. |
-| OCR daemon | `--ocr-daemon serve\|status\|stop\|calibrate` | On launch, plus **Run now** buttons that answer in the status line. `serve` outlives the panel. |
+| OCR daemon | `--ocr-daemon serve\|status\|stop\|calibrate` | Chosen from the dropdown; the choice runs right away and answers in the status line. `serve` outlives the panel. |
 | Extra arguments | anything else | `-s`, `--config <path>`, ... passed through untouched. No control for it in the panel: put them in `settings.json` under `extraArgs`. |
 
-The options are stored in the plugin's `settings.json`, and the global keybinding is
-rewritten a moment after the last change, so the shortcut launches the same command the
-bar icon does. Options the keybinding cannot carry (a comma in a path, characters a
-Hyprland exec command does not survive) are reported in the panel: the bar icon still
-passes them on.
+The options are stored in the plugin's `settings.json`, and the global keybindings are
+rewritten a moment after the last change, so each shortcut launches the same command the
+mode button in the panel does. Options the keybinding cannot carry (a comma in a path,
+characters a Hyprland exec command does not survive) are reported in the panel: the bar
+icon still passes them on.
 
 ## Theme
 
