@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # Keybinding conflict checker/applier for OmaLumineCapture.
 # Pattern adapted from OmaGuake (bramvanoploo.omaguake) conflict-checker.py.
+# One Hyprland binding per capture mode, all inside a single plugin block:
+#   apply-map <json>  {"bindings": {mode: chord}, "args_by_mode": {mode: args},
+#                      "mode": <mode being changed>, "unbind_conflicts": bool}
 import sys
 import os
 import re
@@ -13,6 +16,11 @@ HOME = Path(os.environ.get("HOME", str(Path.home())))
 HYPR_DIR = HOME / ".config" / "hypr"
 BINDINGS_LUA = HYPR_DIR / "bindings.lua"
 PLUGIN_ID = "bramvanoploo.omarchy-lumine-capture"
+
+# Must match LaunchArgs.js MODES; "" is the editor mode.
+MODE_ORDER = ["", "full", "window", "region", "region-ocr"]
+MODE_LABELS = {"": "editor", "full": "full screen", "window": "window",
+               "region": "region", "region-ocr": "region OCR"}
 
 MOD_MAP = {"super": 64, "mod4": 64, "logo": 64, "win": 64, "ctrl": 4, "control": 4, "shift": 1, "alt": 8, "mod1": 8}
 
@@ -75,24 +83,30 @@ def own_block(content):
     return m.group(0) if m else ""
 
 
-def current_own_chord():
+def own_chords():
+    # {normalized chord: mode} for every binding the plugin wrote. Old single
+    # binding blocks (description "LumineCapture: ...") map to the editor mode.
+    chords = {}
     if BINDINGS_LUA.exists():
         try:
             block = own_block(BINDINGS_LUA.read_text(encoding="utf-8"))
-            m = re.search(r'hl\.bind\(\s*["\']([^"\']+)["\']', block)
-            if m:
-                return normalize_key_chord(m.group(1))[0]
+            for m in re.finditer(r'hl\.bind\(\s*["\']([^"\']+)["\'][^\n]*?description = "LumineCapture(?:\[([^\]]*)\])?:', block):
+                norm, _, _ = normalize_key_chord(m.group(1))
+                if norm:
+                    chords[norm] = m.group(2) if m.group(2) is not None else ""
         except Exception:
             pass
-    return None
+    return chords
 
 
 def check_key_conflict(candidate_chord):
     norm, target_mods, target_key = normalize_key_chord(candidate_chord)
     if not target_key:
         return {"conflict": True, "message": "Invalid keybinding string."}
-    if current_own_chord() == norm:
-        return {"conflict": False, "message": f"Keybinding '{norm}' is currently assigned to OmaLumineCapture."}
+    own = own_chords()
+    if norm in own:
+        mode_label = MODE_LABELS.get(own[norm], own[norm])
+        return {"conflict": False, "message": f"Keybinding '{norm}' is currently assigned to OmaLumineCapture ({mode_label})."}
     for b in get_hyprctl_binds():
         desc = b.get("description", "") or ""
         arg = b.get("arg", "") or ""
@@ -119,17 +133,21 @@ def check_key_conflict(candidate_chord):
     return {"conflict": False, "message": f"Keybinding '{norm}' is available."}
 
 
-def find_free_suggestions(exclude_chord=None):
+def find_free_suggestions(exclude_chord=None, extra_excludes=None):
     candidates = [
         "SUPER + SHIFT + S", "CTRL + SHIFT + F12", "SUPER + ALT + C",
         "CTRL + ALT + C", "SUPER + SHIFT + X", "CTRL + SHIFT + P",
     ]
-    norm_exclude = normalize_key_chord(exclude_chord)[0] if exclude_chord else ""
+    taken = set(extra_excludes or [])
+    if exclude_chord:
+        norm_exclude = normalize_key_chord(exclude_chord)[0]
+        if norm_exclude:
+            taken.add(norm_exclude)
     bind_keys = {(int(b.get("modmask", 0)), str(b.get("key", "")).upper()) for b in get_hyprctl_binds()}
     free = []
     for cand in candidates:
         norm, mods, key = normalize_key_chord(cand)
-        if not norm or norm == norm_exclude:
+        if not norm or norm in taken:
             continue
         if (mods, key) not in bind_keys:
             free.append(norm)
@@ -139,26 +157,18 @@ def find_free_suggestions(exclude_chord=None):
 
 
 def get_current_status():
-    applied = current_own_chord() or ""
-    s_norm, s_mods, s_key = normalize_key_chord("SUPER + SHIFT + S")
+    own = own_chords()
+    applied = ", ".join(sorted(own)) if own else ""
+    # No shipped default chord: nothing to suggest until the user records one.
+    s_norm, s_mods, s_key = "", 0, ""
     s_conflict = False
     s_msg = ""
-    if applied != s_norm:
-        for b in get_hyprctl_binds():
-            desc = b.get("description", "") or ""
-            arg = b.get("arg", "") or ""
-            if PLUGIN_ID in arg or PLUGIN_ID in desc:
-                continue
-            if str(b.get("key", "")).upper() == s_key and int(b.get("modmask", 0)) == s_mods:
-                s_conflict = True
-                s_msg = f"'{s_norm}' is in use by '{desc or arg or 'system action'}'."
-                break
     return {
         "applied_key": applied,
-        "suggested_key": "SUPER + SHIFT + S",
+        "suggested_key": "",
         "suggested_key_conflict": s_conflict,
         "suggested_key_conflict_message": s_msg,
-        "key_suggestions": find_free_suggestions(s_norm if s_conflict else ""),
+        "key_suggestions": find_free_suggestions("", set(own)),
     }
 
 
@@ -210,21 +220,33 @@ def disable_key_conflicts_in_configs(chord_norm):
                 pass
 
 
-def apply_configuration(keychord, launch_args, unbind_conflicts=False):
-    args = sanitize_args(launch_args)
-    cmd = ("lumine-capture " + args).strip()
-    norm = ""
-    if keychord and keychord.strip().lower() not in ("none", ""):
-        norm, _, _ = normalize_key_chord(keychord)
+def apply_map(payload):
+    # Rebuild the whole plugin block from the full binding map, so clearing a
+    # mode's shortcut drops its binding without extra bookkeeping.
+    bindings = payload.get("bindings", {})
+    args_by_mode = payload.get("args_by_mode", {})
+    target_mode = payload.get("mode", "")
+    unbind_conflicts = bool(payload.get("unbind_conflicts", False))
+
+    target_chord = (bindings.get(target_mode) or "").strip()
+    if target_chord and target_chord.lower() not in ("none", '""', "''"):
+        norm, _, _ = normalize_key_chord(target_chord)
         if not norm:
             return {"success": False, "error": "Invalid keybinding."}
-        if not unbind_conflicts:
+        own = own_chords()
+        other = own.get(norm)
+        if other is not None and other != target_mode:
+            msg = (f"'{norm}' is already assigned to OmaLumineCapture "
+                   f"({MODE_LABELS.get(other, other)}). Clear that mode's shortcut first.")
+            return {"success": False, "error": msg,
+                    "suggestions": find_free_suggestions(norm, set(own))}
+        if unbind_conflicts:
+            disable_key_conflicts_in_configs(norm)
+        else:
             res = check_key_conflict(norm)
             if res["conflict"]:
-                res["suggestions"] = find_free_suggestions(norm)
+                res["suggestions"] = find_free_suggestions(norm, set(own))
                 return {"success": False, "error": res["message"], "suggestions": res["suggestions"]}
-        else:
-            disable_key_conflicts_in_configs(norm)
 
     BINDINGS_LUA.parent.mkdir(parents=True, exist_ok=True)
     existing = BINDINGS_LUA.read_text(encoding="utf-8") if BINDINGS_LUA.exists() else ""
@@ -233,25 +255,38 @@ def apply_configuration(keychord, launch_args, unbind_conflicts=False):
     live_block = live.group(0) if live else None
     cleaned = re.sub(r"\n*-- BEGIN " + re.escape(PLUGIN_ID) + r".*?-- END " + re.escape(PLUGIN_ID) + r"\n*", "\n", existing, flags=re.DOTALL).strip()
     block_lines = ["", f"-- BEGIN {PLUGIN_ID}"]
-    if norm:
-        if unbind_conflicts:
-            block_lines.append(f'hl.unbind("{norm}")')
+    if target_chord and unbind_conflicts:
+        norm, _, _ = normalize_key_chord(target_chord)
+        block_lines.append(f'hl.unbind("{norm}")')
+    seen = set()
+    for mode in MODE_ORDER:
+        chord = (bindings.get(mode) or "").strip()
+        if not chord or chord.lower() in ("none", '""', "''"):
+            continue
+        norm, _, _ = normalize_key_chord(chord)
+        if not norm or norm in seen:
+            continue  # invalid chords never reach here (checked above); a chord
+            # used by two modes loses the later one, matching the UI rule.
+        seen.add(norm)
+        cmd = ("lumine-capture " + sanitize_args(args_by_mode.get(mode, ""))).strip()
         # Omarchy/Hyprland Lua exposes hl.dsp.exec_cmd / hl.dsp.exec_raw; there is no hl.dsp.exec.
         # Launch through uwsm-app when present so the app gets a systemd scope, like Omarchy's own bindings.
         launch_cmd = cmd
         if shutil.which("uwsm-app"):
             launch_cmd = "uwsm-app -- " + cmd
         safe_cmd = launch_cmd.replace('\\', '').replace('"', "")
-        block_lines.append(f'hl.bind("{norm}", hl.dsp.exec_cmd("{safe_cmd}"), {{ description = "LumineCapture: {cmd}", dont_inhibit = true }})')
+        tag = f"LumineCapture[{MODE_LABELS.get(mode, mode)}]" if mode else "LumineCapture"
+        block_lines.append(f'hl.bind("{norm}", hl.dsp.exec_cmd("{safe_cmd}"), {{ description = "{tag}: {cmd}", dont_inhibit = true }})')
     block_lines.append(f"-- END {PLUGIN_ID}")
     block_lines.append("")
-    # The plugin re-applies the shortcut at shell start to keep it in step with
-    # the launch options. Rewriting the user's hyprland config and reloading the
-    # compositor on every start, for a block that already says this, is not a
-    # start-up side effect worth having, so an unchanged block is left alone.
+    # The plugin re-applies the shortcuts at shell start to keep them in step
+    # with the launch options. Rewriting the user's hyprland config and
+    # reloading the compositor on every start, for a block that already says
+    # this, is not a start-up side effect worth having, so an unchanged block
+    # is left alone.
     new_block = "\n".join(block_lines[1:-1])
     if live_block is not None and "\n".join(live_block.splitlines()) == new_block:
-        return {"success": True, "unchanged": True, "message": "Keybinding already runs this command."}
+        return {"success": True, "unchanged": True, "message": "Keybindings already run these commands."}
     new_content = cleaned + "\n" + "\n".join(block_lines)
     try:
         temp_binding = BINDINGS_LUA.with_suffix(f".tmp.{os.getpid()}")
@@ -263,7 +298,7 @@ def apply_configuration(keychord, launch_args, unbind_conflicts=False):
         subprocess.run(["hyprctl", "reload"], timeout=3)
     except Exception:
         pass
-    return {"success": True, "message": "OmaLumineCapture binding updated."}
+    return {"success": True, "message": "OmaLumineCapture bindings updated."}
 
 
 if __name__ == "__main__":
@@ -271,17 +306,18 @@ if __name__ == "__main__":
     if action == "status":
         print(json.dumps(get_current_status()))
     elif action == "check-key":
-        res = check_key_conflict(sys.argv[2] if len(sys.argv) > 2 else "")
-        if res.get("conflict"):
-            res["suggestions"] = find_free_suggestions(sys.argv[2] if len(sys.argv) > 2 else "")
-        print(json.dumps(res))
-    elif action == "apply":
         chord = sys.argv[2] if len(sys.argv) > 2 else ""
-        if chord.lower() in ("none", '""', "''"):
-            chord = ""
-        args = sys.argv[3] if len(sys.argv) > 3 else ""
-        unbind = len(sys.argv) > 4 and sys.argv[4].lower() in ("1", "true", "yes")
-        res = apply_configuration(chord, args, unbind)
+        res = check_key_conflict(chord)
+        if res.get("conflict"):
+            res["suggestions"] = find_free_suggestions(chord, set(own_chords()))
+        print(json.dumps(res))
+    elif action == "apply-map":
+        try:
+            payload = json.loads(sys.argv[2] if len(sys.argv) > 2 else "{}")
+        except json.JSONDecodeError as e:
+            print(json.dumps({"success": False, "error": f"Bad JSON: {e}"}))
+            sys.exit(1)
+        res = apply_map(payload)
         print(json.dumps(res))
         if not res.get("success"):
             sys.exit(1)

@@ -12,7 +12,13 @@ PopupCard {
   property var configManager: null
   property bool isInstalled: false
 
-  property string currentKeybinding: ""
+  property var keybindings: ({ "": "", "full": "", "window": "", "region": "", "region-ocr": "" })
+  // Which capture mode the record dialog is assigning a shortcut for.
+  property string recordingMode: ""
+  // Last chord the Apply/Take-over button sent, for the status line; and the
+  // silent flag so the silent start-up re-apply never writes a status line.
+  property string lastAppliedChord: ""
+  property bool silentReapply: false
 
   // Mirrors of the launch options in ConfigManager, edited here and written
   // back one at a time.
@@ -24,6 +30,14 @@ PopupCard {
   property string output: ""
   property bool nonotify: false
   property string ocrDaemon: ""
+
+  // Where shots actually go: the Output folder when set, else
+  // lumine-capture's default (its "screenshots" dir under the Pictures dir).
+  readonly property string effectiveOutput: {
+    if (configManager && configManager.expandedOutput !== "") return configManager.expandedOutput
+    var home = Quickshell.env("HOME")
+    return (home ? home : "~") + "/Pictures/screenshots"
+  }
 
   property var toSelection: []
   property string zenityPath: ""
@@ -72,7 +86,7 @@ PopupCard {
 
   function loadCurrentSettings() {
     if (!configManager) return
-    currentKeybinding = configManager.keybinding || ""
+    keybindings = copyKeybindings(configManager.keybindings)
     mode = configManager.mode || ""
     monitor = configManager.monitor === true
     delay = configManager.delay || ""
@@ -106,7 +120,27 @@ PopupCard {
     statusProc.running = true
   }
 
-  function openRecorder() {
+  function copyKeybindings(src) {
+    // Own plain object, so assigning one chord always counts as a change.
+    src = src || {}
+    var out = {}
+    var list = LaunchArgs.MODES
+    for (var i = 0; i < list.length; i++) {
+      var v = src[list[i].value]
+      out[list[i].value] = (v === undefined || v === null) ? "" : String(v).trim()
+    }
+    return out
+  }
+
+  function modeLabel(mode) {
+    var list = LaunchArgs.MODES
+    for (var i = 0; i < list.length; i++)
+      if (list[i].value === mode) return list[i].label
+    return mode
+  }
+
+  function openRecorder(mode) {
+    recordingMode = mode
     recordedChord = ""
     recordedConflict = false
     recordedConflictMessage = ""
@@ -125,14 +159,24 @@ PopupCard {
 
   function applyBinding(chord, unbind) {
     if (!configManager) return
-    currentKeybinding = chord
-    configManager.saveSettings({ keybinding: chord })
-    applyProc.command = [configManager.conflictCheckerScript, "apply", chord || "", configManager.launchArgs, unbind ? "true" : "false"]
+    var map = copyKeybindings(configManager.keybindings)
+    map[recordingMode] = chord
+    keybindings = map
+    lastAppliedChord = chord
+    silentReapply = false
+    configManager.saveSettings({ keybindings: map })
+    var payload = {
+      bindings: map,
+      args_by_mode: configManager.perModeArgs,
+      mode: recordingMode,
+      unbind_conflicts: unbind
+    }
+    applyProc.command = [configManager.conflictCheckerScript, "apply-map", JSON.stringify(payload)]
     applyProc.running = true
   }
 
-  // Write one option, then let the global keybinding pick it up. The exec
-  // command in bindings.lua is a fixed string, so it is rewritten once the
+  // Write one option, then let the global shortcuts pick it up. The exec
+  // commands in bindings.lua are fixed strings, so they are rewritten once the
   // typing settles.
   function saveOption(key, value) {
     if (!configManager) return
@@ -140,17 +184,33 @@ PopupCard {
     patch[key] = value
     configManager.saveSettings(patch)
     loadCurrentSettings()
-    if (key !== "keybinding") reapplyTimer.restart()
+    reapplyTimer.restart()
   }
 
-  // Rewrite the shortcut so it runs the command the options add up to. The chord
-  // comes from the settings, not from the panel's copy of it: this runs at shell
-  // start too, before the panel has ever been opened.
+  // Rewrite the shortcuts so they run the commands the options add up to. The
+  // chords come from the settings, not from the panel's copy of them: this runs
+  // at shell start too, before the panel has ever been opened.
   function reapplyKeybinding() {
     if (!configManager) return
-    var chord = (configManager.keybinding || "").trim()
-    if (chord === "" || chord.toLowerCase() === "none") return
-    applyProc.command = [configManager.conflictCheckerScript, "apply", chord, configManager.launchArgs, "false"]
+    var map = configManager.keybindings || {}
+    var any = false
+    var list = LaunchArgs.MODES
+    for (var i = 0; i < list.length; i++) {
+      var chord = String(map[list[i].value] || "").trim()
+      if (chord !== "" && chord.toLowerCase() !== "none") {
+        any = true
+        break
+      }
+    }
+    if (!any) return
+    var payload = {
+      bindings: map,
+      args_by_mode: configManager.perModeArgs,
+      mode: "",
+      unbind_conflicts: false
+    }
+    applyProc.command = [configManager.conflictCheckerScript, "apply-map", JSON.stringify(payload)]
+    silentReapply = true
     applyProc.running = true
   }
 
@@ -274,11 +334,13 @@ PopupCard {
           try { res = JSON.parse(applyOut.text) } catch (e) {}
           if (res && res.success) {
             root.recordingDialogOpen = false
-            root.statusText = root.currentKeybinding
-              ? "Keybinding applied: " + root.currentKeybinding
-              : "Keybinding removed."
+            if (!root.silentReapply) {
+              root.statusText = root.lastAppliedChord
+                ? "Keybinding applied: " + root.lastAppliedChord + " (" + root.modeLabel(root.recordingMode) + ")"
+                : "Keybinding removed."
+            }
             refreshStatus()
-          } else {
+          } else if (!root.silentReapply) {
             root.statusText = (res && res.error) ? res.error : "Applying keybinding failed."
           }
         }
@@ -427,45 +489,72 @@ PopupCard {
         fontFamily: bar.fontFamily
       }
 
-      Row {
+      Column {
         width: parent.width
         spacing: Style.space(8)
 
-        BorderSurface {
-          implicitWidth: Math.max(kbText.implicitWidth + Style.space(20), Style.space(150))
-          implicitHeight: Style.space(28)
-          color: Util.alpha(Color.foreground, 0.06)
-          borderSpec: Border.flat(Util.alpha(Color.foreground, 0.18), Style.normalBorderWidth)
-          radius: Style.cornerRadius > 0 ? 4 : 0
-          anchors.verticalCenter: parent.verticalCenter
+        HintText {
+          width: parent.width
+          text: "Each capture mode gets its own global shortcut, running the launch options below with that mode. Set a shortcut here, or use the capture button's panel."
+        }
 
-          Text {
-            id: kbText
-            anchors.centerIn: parent
-            text: root.currentKeybinding ? root.currentKeybinding : "(none)"
-            color: root.currentKeybinding ? Color.foreground : Color.muted
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
+        Repeater {
+          model: LaunchArgs.MODES
+
+          Row {
+            required property var modelData
+            width: parent.width
+            spacing: Style.space(8)
+
+            Text {
+              width: Style.space(100)
+              text: modelData.label
+              color: Color.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+              anchors.verticalCenter: parent.verticalCenter
+            }
+
+            BorderSurface {
+              implicitWidth: Math.max(kbText.implicitWidth + Style.space(20), Style.space(130))
+              implicitHeight: Style.space(28)
+              color: Util.alpha(Color.foreground, 0.06)
+              borderSpec: Border.flat(Util.alpha(Color.foreground, 0.18), Style.normalBorderWidth)
+              radius: Style.cornerRadius > 0 ? 4 : 0
+              anchors.verticalCenter: parent.verticalCenter
+
+              Text {
+                id: kbText
+                anchors.centerIn: parent
+                text: root.keybindings[modelData.value] ? root.keybindings[modelData.value] : "(none)"
+                color: root.keybindings[modelData.value] ? Color.foreground : Color.muted
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+            }
+
+            Item { width: Style.space(1); height: 1 }
+
+            Button {
+              text: root.keybindings[modelData.value] ? "Record\u2026" : "Record shortcut\u2026"
+              fontSize: Style.font.caption
+              tooltipText: root.keybindings[modelData.value]
+                ? "Record a new shortcut for " + modelData.label + " (current: " + root.keybindings[modelData.value] + ")"
+                : "Record a global shortcut for " + modelData.label
+              onClicked: root.openRecorder(modelData.value)
+            }
+
+            Button {
+              visible: !!root.keybindings[modelData.value]
+              text: "Clear"
+              fontSize: Style.font.caption
+              tooltipText: "Remove the shortcut for " + modelData.label
+              onClicked: {
+                root.recordingMode = modelData.value
+                root.applyBinding("", false)
+              }
+            }
           }
-        }
-
-        Item { width: Style.space(1); height: 1 }
-
-        Button {
-          text: root.currentKeybinding ? "Record\u2026" : "Record shortcut\u2026"
-          fontSize: Style.font.caption
-          tooltipText: root.currentKeybinding
-            ? "Record a new shortcut (current: " + root.currentKeybinding + ")"
-            : "Record a global shortcut for starting a capture"
-          onClicked: root.openRecorder()
-        }
-
-        Button {
-          visible: !!root.currentKeybinding
-          text: "Clear"
-          fontSize: Style.font.caption
-          tooltipText: "Remove the global shortcut"
-          onClicked: root.applyBinding("", false)
         }
       }
 
@@ -552,23 +641,8 @@ PopupCard {
           onChanged: function(next) {
             root.ocrDaemon = next
             root.saveOption("ocrDaemon", next)
-          }
-        }
-      }
-
-      FormRow {
-        label: "Run now"
-
-        Repeater {
-          model: ["serve", "status", "stop", "calibrate"]
-
-          Button {
-            text: modelData
-            fontSize: Style.font.caption
-            enabled: !root.ocrBusy
-            opacity: enabled ? 1.0 : 0.4
-            tooltipText: "Run this daemon action on the OCR engine right now"
-            onClicked: root.runOcrDaemon(modelData)
+            // The choice is the request: run that daemon action right away.
+            root.runOcrDaemon(next)
           }
         }
       }
@@ -632,7 +706,8 @@ PopupCard {
         TextField {
           id: outputField
           width: Math.max(Style.space(120), parent.controlWidth - browseButton.implicitWidth - Style.space(8))
-          text: root.output
+          // Empty means "the app default": show the resolved default path.
+          text: root.output !== "" ? root.output : root.effectiveOutput
           placeholderText: "the app's own screenshots folder"
           horizontalPadding: Style.space(8)
           verticalPadding: Style.space(4)
@@ -641,7 +716,7 @@ PopupCard {
           accent: Color.accent
           // No shell metacharacters: the path goes to bash -c and to a Hyprland exec.
           validator: RegularExpressionValidator { regularExpression: /^[^"'`$\\|<>;\n\r]*$/ }
-          Binding { target: outputField; property: "text"; value: root.output }
+          Binding { target: outputField; property: "text"; value: root.output !== "" ? root.output : root.effectiveOutput }
           property bool editedHere: false
           onAccepted: root.setOutputText(text)
           onActiveFocusChanged: {
@@ -662,7 +737,7 @@ PopupCard {
         }
       }
 
-      HintText { text: "Saved shots go here, created if missing. A folder here also saves the shot, even when Save is not ticked." }
+      HintText { text: "Saved shots go here, created if missing. Clear the field to use the app default (" + root.effectiveOutput + "). A folder here also saves the shot, even when Save is not ticked." }
 
       // ===== Switches =====
 
@@ -795,7 +870,7 @@ PopupCard {
         spacing: Style.space(14)
 
         Text {
-          text: "Record shortcut"
+          text: "Record shortcut" + (root.recordingMode !== "" ? " \u2014 " + root.modeLabel(root.recordingMode) : "")
           font.family: Style.font.family
           font.pixelSize: Style.font.heading
           font.bold: true
@@ -926,10 +1001,7 @@ PopupCard {
             text: "Take over (disable conflicting binding)"
             fontSize: Style.font.caption
             tooltipText: "Comment out the conflicting Hyprland binding and assign this key to LumineCapture"
-            onClicked: {
-              root.applyBinding(root.recordedChord, true)
-              root.recordingDialogOpen = false
-            }
+            onClicked: root.applyBinding(root.recordedChord, true)
           }
         }
 

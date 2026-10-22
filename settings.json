@@ -1,5 +1,11 @@
 {
-  "keybinding": "SUPER + SHIFT + S",
+  "keybindings": {
+    "": "",
+    "full": "",
+    "window": "",
+    "region": "",
+    "region-ocr": ""
+  },
   "mode": "",
   "monitor": false,
   "delay": "",

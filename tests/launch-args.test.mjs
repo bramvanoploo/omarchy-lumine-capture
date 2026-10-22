@@ -13,7 +13,7 @@ const src = readFileSync(path.join(here, "..", "LaunchArgs.js"), "utf8").replace
 // Top-level `function`/`var` declarations of the library live in the scope of
 // the wrapper, so hand the ones under test back out as an object.
 const names = ["MODES", "TO_OPTIONS", "TO_ORDER", "DAEMON_ACTIONS", "defaultOptions",
-  "normalizeDelay", "toLetters", "quotePath", "cleanPath", "buildArgs", "tokenize", "parseArgs", "modeArgv"]
+  "normalizeDelay", "toLetters", "quotePath", "cleanPath", "buildArgs", "buildArgsForMode", "tokenize", "parseArgs", "modeArgv"]
 const api = new Function(`"use strict"; ${src}; return {${names.join(", ")}}`)()
 
 let failures = 0
@@ -104,6 +104,14 @@ eq("letters are the option values", api.TO_OPTIONS.map(o => o.value), api.TO_ORD
 eq("daemon actions", api.DAEMON_ACTIONS.map(o => o.value), ["", "serve", "status", "stop", "calibrate"])
 eq("modes cover every mode flag", api.MODES.map(m => m.argv.join(" ")).sort(),
   ["", "-f", "-r", "-r ocr", "-w"].sort())
+
+// --- per-mode shortcut commands
+{
+  const base = { mode: "region", monitor: false, delay: "2", to: "cs", toNothing: false, output: "", nonotify: true, ocrDaemon: "serve", extraArgs: "" }
+  eq("mode command swaps the mode", api.buildArgsForMode(base, "full").args, "-f -d 2 -t cs -n")
+  eq("mode command drops the daemon", api.buildArgsForMode(base, "region-ocr").argv.join(" "), "-r ocr -d 2 -t cs -n")
+  eq("editor command has no mode flag", api.buildArgsForMode(base, "").args, "-d 2 -t cs -n")
+}
 
 console.log(failures ? `\n${failures} failed` : "\nall good")
 process.exit(failures ? 1 : 0)
