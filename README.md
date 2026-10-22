@@ -2,6 +2,8 @@
 
 An [Omarchy](https://omarchy.org) status bar plugin for [LumineCapture](https://github.com/Netflate/LumineCapture), the fast, lightweight Wayland screenshot tool.
 
+![LumineCapture Preview](preview.png)
+
 ## Installation
 
 ```bash
@@ -86,6 +88,17 @@ flags is testable without a shell:
 ```bash
 node tests/launch-args.test.mjs
 ```
+
+`preview.png` is rendered, not drawn by hand:
+
+```bash
+scripts/render-preview.sh
+```
+
+It photographs `docs/preview.html` with headless Chromium, tinted with the accent colours of the
+active Omarchy theme and versioned from `manifest.json`. The two images in `docs/` are real UI:
+refresh `shot-panel.png` after panel changes by opening the panel, running `grim`, and cropping the
+settings card (`1044x1622+2406+52` at this display scale).
 
 ## License
 
