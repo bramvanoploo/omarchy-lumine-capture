@@ -327,31 +327,58 @@ PopupCard {
       // ===== Header =====
       Row {
         width: parent.width
-        spacing: Style.space(10)
+        spacing: Style.space(14)
 
         Text {
           text: "\uf030"
           color: Color.accent
           font.family: Style.font.family
-          font.pixelSize: Style.font.heading * 1.1
+          font.pixelSize: Math.max(Style.font.heading, Math.round(headerTextCol.implicitHeight))
           anchors.verticalCenter: parent.verticalCenter
         }
 
         Column {
+          id: headerTextCol
           anchors.verticalCenter: parent.verticalCenter
-          spacing: 1
+          spacing: Style.space(2)
 
-          Text {
-            text: "OmaLumineCapture"
-            color: Color.foreground
-            font.family: Style.font.family
-            font.pixelSize: Style.font.heading
-            font.weight: Font.DemiBold
+          Row {
+            spacing: Style.space(8)
+
+            Text {
+              text: "OmaLumineCapture"
+              color: Color.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.heading
+              font.weight: Font.DemiBold
+              anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Rectangle {
+              anchors.verticalCenter: parent.verticalCenter
+              height: Style.space(18)
+              width: versionText.implicitWidth + Style.space(12)
+              radius: Style.cornerRadius > 0 ? 4 : 0
+              color: Util.alpha(Color.accent, 0.15)
+              border.color: Util.alpha(Color.accent, 0.4)
+              border.width: 1
+
+              Text {
+                id: versionText
+                anchors.centerIn: parent
+                text: "v" + (configManager ? configManager.version : "")
+                color: Color.accent
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.weight: Font.Bold
+              }
+            }
           }
 
           Text {
-            text: "v" + (configManager ? configManager.version : "") + (root.isInstalled ? "" : "  \u00b7  app not installed")
-            color: root.isInstalled ? Color.muted : Color.accent
+            visible: !root.isInstalled
+            text: "lumine-capture is not installed"
+            color: Color.accent
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
           }
