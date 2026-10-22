@@ -339,3 +339,14 @@ function parseArgs(str) {
   o.extraArgs = extra.join(" ")
   return o
 }
+
+// Per-mode shortcut command: the global options with the mode replaced by the
+// mode of the shortcut. The OCR daemon action is a command of its own, so it
+// is dropped here; buildArgs would emit it alone and drop the mode flag.
+function buildArgsForMode(opts, mode) {
+  var merged = {}
+  for (var k in opts) merged[k] = opts[k]
+  merged.mode = mode
+  merged.ocrDaemon = ""
+  return buildArgs(merged)
+}

@@ -17,7 +17,11 @@ QtObject {
   readonly property string themeSyncScript: pluginDir + "/scripts/sync-theme.py"
   readonly property string themeNameFile: (homeDir ? homeDir : "~") + "/.local/state/omarchy/current/theme.name"
 
-  property string keybinding: "SUPER + SHIFT + S"
+  // One global shortcut per capture mode; the keys are the mode values of
+  // LaunchArgs.MODES, "" is the editor. "" = that mode has no shortcut.
+  // The old single "keybinding" setting is migrated to the editor mode.
+  // There is no shipped default: the user records their own after installing.
+  property var keybindings: ({ "": "", "full": "", "window": "", "region": "", "region-ocr": "" })
 
   // One property per lumine-capture command line option the panel exposes.
   // LaunchArgs.js is what turns them into arguments, and reads them back.
@@ -54,6 +58,30 @@ QtObject {
   // What the bar icon and the global keybinding run after `lumine-capture`.
   readonly property string launchArgs: built.args
   readonly property var launchWarnings: built.warnings
+
+  // The same options per shortcut mode: {mode value: arguments}. Each binding
+  // runs the global options with its own mode, built by the same LaunchArgs
+  // code the settings panel warns with.
+  readonly property var perModeArgs: buildPerModeArgs()
+
+  function buildPerModeArgs() {
+    var opts = {
+      mode: mode,
+      monitor: monitor,
+      delay: delay,
+      to: to,
+      toNothing: toNothing,
+      output: expandedOutput,
+      nonotify: nonotify,
+      ocrDaemon: ocrDaemon,
+      extraArgs: extraArgs
+    }
+    var out = {}
+    var list = LaunchArgs.MODES
+    for (var i = 0; i < list.length; i++)
+      out[list[i].value] = LaunchArgs.buildArgsForMode(opts, list[i].value).args
+    return out
+  }
 
   // LumineCapture mirrors the Omarchy theme. The poller re-runs the sync script
   // on a timer: cheap (it exits when the theme fingerprint is unchanged) and it
@@ -123,7 +151,12 @@ QtObject {
     if (!raw || !raw.trim()) { applyDefaults(); return }
     try {
       var data = JSON.parse(raw)
-      if (data.keybinding !== undefined) keybinding = String(data.keybinding)
+      if (data.keybindings !== undefined) {
+        keybindings = normalizeKeybindings(data.keybindings)
+      } else if (data.keybinding !== undefined) {
+        // Pre-per-mode settings: the one shortcut belonged to the editor.
+        keybindings = normalizeKeybindings({ "": String(data.keybinding) })
+      }
 
       var keys = optionKeys()
       var structured = false
@@ -150,8 +183,20 @@ QtObject {
     }
   }
 
+  function normalizeKeybindings(src) {
+    // Plain JS object with every mode key present, chords trimmed.
+    var out = {}
+    var list = LaunchArgs.MODES
+    src = src || {}
+    for (var i = 0; i < list.length; i++) {
+      var v = src[list[i].value]
+      out[list[i].value] = (v === undefined || v === null) ? "" : String(v).trim()
+    }
+    return out
+  }
+
   function applyDefaults() {
-    keybinding = "SUPER + SHIFT + S"
+    keybindings = ({ "": "", "full": "", "window": "", "region": "", "region-ocr": "" })
     mode = ""
     monitor = false
     delay = ""
@@ -165,7 +210,7 @@ QtObject {
 
   function settingsObject() {
     return {
-      keybinding: keybinding,
+      keybindings: keybindings,
       mode: mode,
       monitor: monitor,
       delay: delay,
@@ -180,7 +225,7 @@ QtObject {
 
   function saveSettings(obj) {
     obj = obj || {}
-    if (obj.keybinding !== undefined) keybinding = String(obj.keybinding)
+    if (obj.keybindings !== undefined) keybindings = normalizeKeybindings(obj.keybindings)
     if (obj.mode !== undefined) mode = String(obj.mode)
     if (obj.monitor !== undefined) monitor = (obj.monitor === true)
     if (obj.delay !== undefined) setDelay(obj.delay)
@@ -209,6 +254,13 @@ QtObject {
     settingsChanged()
   }
 
+  // FileView never loads by itself — without these the persisted settings
+  // and the manifest version stayed empty at shell start.
+  Component.onCompleted: {
+    settingsFile.reload()
+    manifestFile.reload()
+  }
+
   property var _settingsFile: FileView {
     id: settingsFile
     path: root.configPath
@@ -231,6 +283,7 @@ QtObject {
   }
 
   property var _manifestFile: FileView {
+    id: manifestFile
     path: root.pluginDir + "/manifest.json"
     watchChanges: false
     printErrors: false

@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "bramvanoploo.omarchy-lumine-capture",
   "name": "OmaLumineCapture",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Bram van Oploo",
   "license": "MIT",
-  "description": "LumineCapture integration for Omarchy: bar launcher with automatic AUR dependency installation, conflict-checked global keybinding, and a full configuration panel for LumineCapture",
+  "description": "LumineCapture integration for Omarchy: bar launcher with automatic AUR dependency installation, a conflict-checked global shortcut per capture mode, and a full configuration panel for LumineCapture",
   "kinds": [
     "bar-widget"
   ],
@@ -15,12 +15,12 @@
   },
   "barWidget": {
     "displayName": "OmaLumineCapture",
-    "description": "LumineCapture launcher with AUR auto-install, keybinding and configuration",
+    "description": "LumineCapture launcher with AUR auto-install, per-mode keybindings and configuration",
     "category": "Utilities",
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "keybinding": "SUPER + SHIFT + S",
+      "keybindings": { "": "", "full": "", "window": "", "region": "", "region-ocr": "" },
       "mode": "",
       "monitor": false,
       "delay": "",
@@ -32,10 +32,10 @@
     },
     "schema": [
       {
-        "key": "keybinding",
-        "type": "string",
-        "label": "Capture keybinding",
-        "description": "Global shortcut chord to start a LumineCapture session. Empty disables the binding."
+        "key": "keybindings",
+        "type": "object",
+        "label": "Capture keybindings",
+        "description": "Global shortcut per capture mode (editor, full, window, region, region-ocr). Empty disables that mode's binding. Edited in the plugin panel."
       },
       {
         "key": "mode",
