@@ -28,6 +28,10 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  Component.onCompleted: {
+    checkInstalledProc.running = true
+  }
+
   Process {
     id: checkInstalledProc
     command: ["pacman", "-Q", "lumine-capture-bin"]
@@ -61,6 +65,7 @@ BarWidget {
       if (code === 0 && config.delay !== "" && config.delay !== "0") {
         config.setDelay("0")
         config.saveSettings({ "delay": "0" })
+        reapplyTimer.restart()
       }
     }
   }
@@ -68,6 +73,7 @@ BarWidget {
   // "" means the mode from the launch options — the legacy entry points
   // (bar keyboard, IPC) keep honoring the Mode setting.
   function launchCapture(mode) {
+    if (launchProc.running) return
     var args = (mode === undefined || mode === "")
       ? config.launchArgs
       : (config.perModeArgs[mode] !== undefined ? config.perModeArgs[mode] : "")
@@ -129,8 +135,7 @@ BarWidget {
   // default (its config's relative "screenshots" under the Pictures dir).
   readonly property string screenshotsDir: {
     if (config.expandedOutput !== "") return config.expandedOutput
-    var home = Quickshell.env("HOME")
-    return (home ? home : "~") + "/Pictures/screenshots"
+    return config.defaultOutput
   }
 
   // Re-apply the shortcuts after a launch option changes, debounced so a run
@@ -190,7 +195,7 @@ BarWidget {
   IpcHandler {
     target: "omalumine.bar"
     function toggleSettings(): void { root.toggleSettings() }
-    function openSettings(): void { root.settingsOpen = true }
+    function openSettings(): void { root.panelOpen = false; root.settingsOpen = true }
     function closeSettings(): void { root.settingsOpen = false }
     function checkAndOpen(): void { root.checkAndOpen("") }
     function captureMode(mode: string): void { root.checkAndOpen(mode) }
@@ -208,7 +213,7 @@ BarWidget {
       root.isInstalling = false
       checkInstalledProc.running = true
     }
-    function openRecorder(): void { settingsPopup.openRecorder("") }
+    function openRecorder(): void { root.panelOpen = false; root.settingsOpen = true; settingsPopup.openRecorder("") }
     function themeInfo(): string {
       return JSON.stringify({ theme: config.themeName, status: config.themeStatus })
     }

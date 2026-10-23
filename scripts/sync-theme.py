@@ -51,22 +51,36 @@ def read_toml(path):
         raw = path.read_text(encoding="utf-8")
     except OSError:
         return out
-    for line in raw.splitlines():
+    return parse_toml_text(raw)
+
+
+def parse_toml_text(raw):
+    """Return {section: {key: value_string}} from a TOML string."""
+    out = {}
+    section = ""
+    for line in (raw or "").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         if stripped.startswith("["):
-            section = stripped.strip("[]").strip()
+            close_idx = stripped.find("]")
+            section = (stripped[1:close_idx] if close_idx > 0 else stripped.strip("[]")).strip()
             out.setdefault(section, {})
             continue
         m = re.match(r"([A-Za-z0-9_.\-]+)\s*=\s*(.+)", stripped)
         if not m:
             continue
         value = m.group(2).strip()
-        # strip an inline comment that follows a quoted value
-        value = re.sub(r"\s+#.*$", "", value).strip()
-        if value.startswith('"') and value.endswith('"') and len(value) > 1:
-            value = value[1:-1]
+        if value.startswith('"'):
+            end_q = value.find('"', 1)
+            if end_q > 0:
+                value = value[1:end_q]
+        elif value.startswith("'"):
+            end_q = value.find("'", 1)
+            if end_q > 0:
+                value = value[1:end_q]
+        else:
+            value = re.sub(r"\s*#.*$", "", value).strip()
         out.setdefault(section, {})[m.group(1)] = value
     return out
 
@@ -90,7 +104,9 @@ def normalize_hex(value):
     return (r, g, b, a)
 
 
-def to_hex(rgb):
+def to_hex(rgb, fallback="#000000"):
+    if not rgb:
+        return fallback
     r, g, b, a = rgb
     h = "#" + "".join(f"{max(0, min(255, round(c * 255))):02x}" for c in (r, g, b))
     if a < 0.999:
@@ -101,10 +117,12 @@ def to_hex(rgb):
 def mix(color_a, color_b, ratio):
     """Blend two colors: ratio 0 returns color_a, 1 returns color_b."""
     a, b = normalize_hex(color_a), normalize_hex(color_b)
+    if not a and not b:
+        return "#000000"
     if not a:
-        return b
+        return to_hex(b)
     if not b:
-        return a
+        return to_hex(a)
     return to_hex(tuple(a[i] + (b[i] - a[i]) * ratio for i in range(4)))
 
 
@@ -272,7 +290,7 @@ def read_state():
 
 def current_colors_in_config(text):
     """Color values LumineCapture's config currently holds, for idempotency."""
-    return read_toml(LC_CONFIG).get("theme", {})
+    return parse_toml_text(text).get("theme", {})
 
 
 def do_sync(force):
@@ -284,7 +302,10 @@ def do_sync(force):
         return {"success": False, "error": "Could not read Omarchy theme colors."}
 
     exists = LC_CONFIG.exists()
-    text = LC_CONFIG.read_text(encoding="utf-8") if exists else ""
+    try:
+        text = LC_CONFIG.read_text(encoding="utf-8") if exists else ""
+    except OSError:
+        text = ""
     have = current_colors_in_config(text)
     matches = all(have.get(k) == v for k, v in colors.items())
 
@@ -296,7 +317,13 @@ def do_sync(force):
         LC_CONFIG.parent.mkdir(parents=True, exist_ok=True)
         text = "# LumineCapture config, created by OmaLumineCapture theme sync.\n"
 
-    LC_CONFIG.write_text(patch(text, colors, theme_name), encoding="utf-8")
+    patched = patch(text, colors, theme_name)
+    try:
+        temp_cfg = LC_CONFIG.with_suffix(f".tmp.{os.getpid()}")
+        temp_cfg.write_text(patched, encoding="utf-8")
+        temp_cfg.replace(LC_CONFIG)
+    except OSError:
+        LC_CONFIG.write_text(patched, encoding="utf-8")
     write_state(fingerprint, colors, theme_name)
     return {"success": True, "changed": True, "theme": theme_name, "colors": colors}
 

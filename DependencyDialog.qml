@@ -26,7 +26,7 @@ PanelWindow {
   onOpenChanged: {
     if (open) {
       selectedIndex = 1
-      dialogCatcher.forceActiveFocus()
+      Qt.callLater(function() { dialogCatcher.forceActiveFocus() })
     }
   }
 

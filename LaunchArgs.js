@@ -54,7 +54,7 @@ var MAX_DELAY = 3600
 
 function modeArgv(mode) {
   for (var i = 0; i < MODES.length; i++) {
-    if (MODES[i].value === mode) return MODES[i].argv
+    if (MODES[i].value === mode) return MODES[i].argv.slice()
   }
   return []
 }
@@ -82,7 +82,7 @@ function defaultOptions() {
 
 // Seconds as typed: accepts "3", "0.5", ".5", "3,5". Returns "" for no delay.
 function normalizeDelay(raw) {
-  var t = String(raw === undefined || raw === null ? "" : raw).trim().replace(",", ".")
+  var t = String(raw === undefined || raw === null ? "" : raw).trim().replace(/,/g, ".")
   if (t === "") return ""
   if (!/^(\d+(\.\d*)?|\.\d+)$/.test(t)) return null
   var n = Number(t)
@@ -126,13 +126,13 @@ function quotePath(p) {
   // Single quotes, the way Omarchy's own Hyprland bindings quote commands.
   // A literal single quote in the path is out of reach: the plugin's launchers
   // strip them, so drop it here rather than build a command line that breaks.
-  var clean = String(p).replace(/'/g, "")
+  var clean = String(p).replace(/['\r\n]/g, "")
   return SAFE_PATH.test(clean) ? clean : "'" + clean + "'"
 }
 
 // Path as stored in settings.json: strip surrounding quotes a user may paste.
 function cleanPath(p) {
-  var t = String(p === undefined || p === null ? "" : p).trim()
+  var t = String(p === undefined || p === null ? "" : p).replace(/[\r\n]/g, "").trim()
   if (t.length >= 2 && (t.charAt(0) === "'" && t.charAt(t.length - 1) === "'" ||
       t.charAt(0) === '"' && t.charAt(t.length - 1) === '"')) {
     t = t.slice(1, -1)
@@ -202,17 +202,23 @@ function buildArgs(opts) {
       if (letters.indexOf("r") >= 0 && mode !== "region-ocr") {
         warnings.push("Primary selection only does something in Region OCR mode; a screenshot ignores it.")
       }
-      if (letters.indexOf("o") >= 0 && mode === "region-ocr") {
+      if ((letters.indexOf("p") >= 0 || letters.indexOf("s") >= 0) && mode === "region-ocr") {
         warnings.push("The OCR run uses copy, primary selection and stdout; pin and save are ignored.")
       }
     }
 
     if (output) {
-      argv.push("-o", quotePath(output))
+      var cleanOut = String(output).replace(/[\r\n]/g, "")
+      var quotedOut = quotePath(cleanOut)
+      if (cleanOut.charAt(0) === "-") {
+        argv.push("--output=" + quotedOut)
+      } else {
+        argv.push("-o", quotedOut)
+      }
       if (letters && letters.indexOf("s") < 0) {
         warnings.push("An output folder saves the shot, so it is saved even without \u201cSave\u201d ticked.")
       }
-      if (output.indexOf(",") >= 0) {
+      if (cleanOut.indexOf(",") >= 0) {
         warnings.push("The output path contains a comma, which the global keybinding cannot carry: only the bar icon will pass it on.")
       }
     }
@@ -220,9 +226,13 @@ function buildArgs(opts) {
     if (o.nonotify) argv.push("-n")
   }
 
-  var extra = String(o.extraArgs || "").trim()
+  var extra = String(o.extraArgs || "").replace(/[\r\n]+/g, " ").trim()
   if (extra) {
-    argv.push(extra)
+    var extraTokens = tokenize(extra)
+    for (var ei = 0; ei < extraTokens.length; ei++) {
+      var et = extraTokens[ei]
+      argv.push(needsQuoting(et) ? quotePath(et) : et)
+    }
     if (!/^[\x20-\x7e]*$/.test(extra) || !/^[A-Za-z0-9 ._+=/@%:,~'-]*$/.test(extra)) {
       warnings.push("Extra arguments use characters the global keybinding cannot carry: only the bar icon will pass them on.")
     }
@@ -341,12 +351,12 @@ function parseArgs(str) {
       extra.push(t)
       if (!hasEq) {
         var val = valueOf("", longName)
-        if (val !== "") extra.push(needsQuoting(val) ? "'" + val + "'" : val)
+        if (val !== "") extra.push(needsQuoting(val) ? quotePath(val) : val)
       }
       continue
     }
     // "ocr" on its own, or anything unrecognised: keep it for the user.
-    extra.push(needsQuoting(t) ? "'" + t + "'" : t)
+    extra.push(needsQuoting(t) ? quotePath(t) : t)
   }
 
   o.extraArgs = extra.join(" ")
@@ -358,7 +368,11 @@ function parseArgs(str) {
 // is dropped here; buildArgs would emit it alone and drop the mode flag.
 function buildArgsForMode(opts, mode) {
   var merged = {}
-  for (var k in opts) merged[k] = opts[k]
+  if (opts) {
+    for (var k in opts) {
+      if (Object.prototype.hasOwnProperty.call(opts, k)) merged[k] = opts[k]
+    }
+  }
   merged.mode = mode
   merged.ocrDaemon = ""
   return buildArgs(merged)

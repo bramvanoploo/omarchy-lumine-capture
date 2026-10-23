@@ -10,7 +10,7 @@ QtObject {
 
   property string pluginDir: ""
   readonly property string homeDir: Quickshell.env("HOME") || ""
-  property string version: "0.2.0"
+  property string version: "0.4.0"
   readonly property string pluginId: "bramvanoploo.omarchy-lumine-capture"
   readonly property string configPath: (homeDir ? homeDir : "~") + "/.config/omarchy/plugins/" + pluginId + "/settings.json"
   readonly property string conflictCheckerScript: pluginDir + "/scripts/conflict-checker.py"
@@ -30,9 +30,10 @@ QtObject {
   property bool monitor: false           // -m, --monitor
   property string delay: ""              // -d, --delay <SECONDS>; "" = no flag
   property string to: ""                 // -t, --to <LETTERS>; "" = general.to of the app
-  // general.to read from the app's own config, for the panel to show what an
-  // untouched "Send to" means. "" when the app config is missing or has no to.
+  // general.to and save.directory read from the app's own config, for the
+  // panel to show what untouched options mean. "" when missing.
   property string appTo: ""
+  property string appOutput: ""
   property bool toNothing: false         // -t bare: do nothing by default
   property string output: ""             // -o, --output <DIR>; "" = the app's own folder
   property bool nonotify: false          // -n, --nonotify
@@ -45,6 +46,18 @@ QtObject {
     var p = output
     if (p === "~" || p.indexOf("~/") === 0) return (homeDir ? homeDir : "~") + p.slice(1)
     return p
+  }
+
+  // Where shots land by default when Output is empty: resolved from the app's
+  // own [save] directory (relative to ~/Pictures, or absolute), falling back
+  // to ~/Pictures/screenshots.
+  readonly property string defaultOutput: {
+    var base = (homeDir ? homeDir : "~") + "/Pictures"
+    var dir = appOutput.trim()
+    if (!dir) return base + "/screenshots"
+    if (dir === "~" || dir.indexOf("~/") === 0) return (homeDir ? homeDir : "~") + dir.slice(1)
+    if (dir.charAt(0) === "/") return dir
+    return base + "/" + dir
   }
 
   readonly property var built: LaunchArgs.buildArgs({
@@ -96,6 +109,7 @@ QtObject {
   signal settingsChanged()
 
   function syncTheme(force) {
+    if (themeSyncProc.running) return
     themeSyncProc.command = [themeSyncScript, force ? "--force" : "--check"]
     themeSyncProc.running = true
   }
@@ -264,6 +278,7 @@ QtObject {
     settingsFile.reload()
     manifestFile.reload()
     appConfigFile.reload()
+    themeNameFileView.reload()
   }
 
   property var _settingsFile: FileView {
@@ -278,6 +293,7 @@ QtObject {
   }
 
   property var _themeNameFile: FileView {
+    id: themeNameFileView
     path: root.themeNameFile
     watchChanges: true
     atomicWrites: true
@@ -293,8 +309,29 @@ QtObject {
     path: (homeDir ? homeDir : "~") + "/.config/LumineCapture/config.toml"
     watchChanges: true
     printErrors: false
-    onLoaded: root.appTo = LumineConfig.value(text(), "general", "to")
-    onLoadFailed: root.appTo = ""
+    onLoaded: {
+      var raw = text()
+      var sections = LumineConfig.parse(raw)
+      var foundTo = "", foundDir = ""
+      for (var i = 0; i < sections.length; i++) {
+        var s = sections[i]
+        if (s.name === "general") {
+          for (var j = 0; j < s.items.length; j++) {
+            if (s.items[j].key === "to") foundTo = String(s.items[j].val)
+          }
+        } else if (s.name === "save") {
+          for (var k = 0; k < s.items.length; k++) {
+            if (s.items[k].key === "directory") foundDir = String(s.items[k].val)
+          }
+        }
+      }
+      root.appTo = foundTo
+      root.appOutput = foundDir
+    }
+    onLoadFailed: {
+      root.appTo = ""
+      root.appOutput = ""
+    }
     onFileChanged: reload()
   }
 

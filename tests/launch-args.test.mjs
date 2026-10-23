@@ -53,14 +53,23 @@ eq("daemon warns about dropped options",
 // --- warnings that point at the app's own quirks
 eq("r letter without ocr mode", api.buildArgs({ to: "cr" }).warnings.length, 1)
 eq("r letter with ocr mode is quiet", api.buildArgs({ mode: "region-ocr", to: "cr" }).warnings.length, 0)
+eq("o letter with ocr mode is quiet", api.buildArgs({ mode: "region-ocr", to: "co" }).warnings.length, 0)
+eq("p or s letter with ocr mode warns", api.buildArgs({ mode: "region-ocr", to: "cp" }).warnings.length, 1)
 eq("-o implies save", api.buildArgs({ to: "c", output: "/tmp/x" }).warnings.length, 1)
 eq("-o with save ticked is quiet", api.buildArgs({ to: "cs", output: "/tmp/x" }).warnings.length, 0)
 eq("-m with -w", api.buildArgs({ mode: "window", monitor: true }).warnings.length, 1)
 eq("bad delay", api.buildArgs({ delay: "3sec" }).warnings.length, 1)
 eq("comma in path", api.buildArgs({ output: "/tmp/a,b" }).warnings.length, 1)
+eq("output starting with dash uses --output=", api.buildArgs({ output: "-weird" }).args, "--output=-weird")
+eq("modeArgv returns a defensive copy", (() => {
+  const a = api.modeArgv("region")
+  a.push("-x")
+  return api.modeArgv("region")
+})(), ["-r"])
 
 // --- extra args pass through untouched
 eq("extra args", api.buildArgs({ mode: "region", extraArgs: "-s" }).args, "-r -s")
+eq("extra args tokenized into argv", api.buildArgs({ mode: "region", extraArgs: "-s --config /tmp/c.toml" }).argv, ["-r", "-s", "--config", "/tmp/c.toml"])
 
 // --- reading a command line back (migration from the free-text field)
 eq("parse mixed", api.parseArgs("-r -t sc -m"), {

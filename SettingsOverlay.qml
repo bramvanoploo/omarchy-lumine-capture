@@ -43,6 +43,7 @@ Item {
   // lumine-capture's default (its "screenshots" dir under the Pictures dir).
   readonly property string effectiveOutput: {
     if (configManager && configManager.expandedOutput !== "") return configManager.expandedOutput
+    if (configManager && configManager.defaultOutput !== "") return configManager.defaultOutput
     var home = Quickshell.env("HOME")
     return (home ? home : "~") + "/Pictures/screenshots"
   }
@@ -97,6 +98,7 @@ Item {
       Qt.callLater(function() { panelKeyCatcher.forceActiveFocus() })
     } else {
       recordingDialogOpen = false
+      zenityAskOpen = false
     }
   }
 
@@ -134,6 +136,7 @@ Item {
 
   // The launch options LumineCapture will be started with.
   readonly property string launchArgs: configManager ? configManager.launchArgs : ""
+  readonly property var launchWarnings: configManager ? configManager.launchWarnings : []
   readonly property string daemonHint: {
     var daemon = configManager ? configManager.ocrDaemon || "" : ""
     for (var i = 0; i < LaunchArgs.DAEMON_ACTIONS.length; i++) {
@@ -187,6 +190,11 @@ Item {
     isCheckingRecordedKey = false
     recordingDialogOpen = true
     Qt.callLater(function() { recordKeyCatcher.forceActiveFocus() })
+  }
+
+  function closeRecorder() {
+    recordingDialogOpen = false
+    Qt.callLater(function() { panelKeyCatcher.forceActiveFocus() })
   }
 
   function checkRecordedKey(chord) {
@@ -264,8 +272,12 @@ Item {
   }
 
   function setOutputText(text) {
-    output = text
-    saveOption("output", text)
+    var t = String(text || "").trim()
+    // If the field still holds the resolved default path while the setting itself
+    // was empty, keep it empty so the user's config stays on the app default.
+    if (output === "" && t === effectiveOutput) return
+    output = t
+    saveOption("output", t)
   }
 
   function browseOutput() {
@@ -336,13 +348,14 @@ Item {
   function recordedKeyStr(k, text) {
     if (k >= Qt.Key_A && k <= Qt.Key_Z) return String.fromCharCode(k)
     if (k >= Qt.Key_0 && k <= Qt.Key_9) return String.fromCharCode(k)
-    if (k >= Qt.Key_F1 && k <= Qt.Key_F12) return "F" + (k - Qt.Key_F1 + 1)
+    if (k >= Qt.Key_F1 && k <= Qt.Key_F24) return "F" + (k - Qt.Key_F1 + 1)
     var map = {}
     map[Qt.Key_Space] = "SPACE"; map[Qt.Key_Escape] = "ESCAPE"; map[Qt.Key_Return] = "RETURN"
     map[Qt.Key_Enter] = "RETURN"; map[Qt.Key_Tab] = "TAB"; map[Qt.Key_Backspace] = "BACKSPACE"
     map[Qt.Key_Delete] = "DELETE"; map[Qt.Key_Insert] = "INSERT"; map[Qt.Key_Home] = "HOME"
     map[Qt.Key_End] = "END"; map[Qt.Key_PageUp] = "PAGEUP"; map[Qt.Key_PageDown] = "PAGEDOWN"
     map[Qt.Key_Left] = "LEFT"; map[Qt.Key_Right] = "RIGHT"; map[Qt.Key_Up] = "UP"; map[Qt.Key_Down] = "DOWN"
+    map[Qt.Key_Print] = "PRINT"; map[Qt.Key_SysReq] = "PRINT"; map[Qt.Key_Pause] = "PAUSE"
     map[Qt.Key_Grave] = "GRAVE"; map[Qt.Key_Minus] = "MINUS"; map[Qt.Key_Equal] = "EQUAL"
     map[Qt.Key_Comma] = "COMMA"; map[Qt.Key_Period] = "PERIOD"; map[Qt.Key_Slash] = "SLASH"
     map[Qt.Key_Semicolon] = "SEMICOLON"; map[Qt.Key_Apostrophe] = "APOSTROPHE"; map[Qt.Key_Backslash] = "BACKSLASH"
@@ -368,14 +381,15 @@ Item {
                                    ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
-    // Escape closes the overlay; the record dialog answers it first.
+    // Escape closes the overlay; the record or zenity dialog answers it first.
     Item {
       id: panelKeyCatcher
       anchors.fill: parent
       focus: true
       Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape) {
-          if (root.recordingDialogOpen) root.recordingDialogOpen = false
+          if (root.zenityAskOpen) { root.zenityAskOpen = false; Qt.callLater(function() { panelKeyCatcher.forceActiveFocus() }) }
+          else if (root.recordingDialogOpen) root.closeRecorder()
           else root.close()
           event.accepted = true
         }
@@ -743,7 +757,7 @@ Item {
 
               TextField {
                 id: outputField
-                width: Math.max(Style.space(120), parent.controlWidth - browseButton.implicitWidth - Style.space(8))
+                width: Math.max(Style.space(120), parent.controlWidth - browseButton.implicitWidth - Style.space(8) - (clearOutputButton.visible ? clearOutputButton.implicitWidth + Style.space(8) : 0))
                 // Empty means "the app default": show the resolved default path.
                 text: root.output !== "" ? root.output : root.effectiveOutput
                 placeholderText: "the app's own screenshots folder"
@@ -772,6 +786,46 @@ Item {
                 onClicked: root.browseOutput()
                 anchors.verticalCenter: parent.verticalCenter
               }
+
+              Button {
+                id: clearOutputButton
+                visible: root.output !== ""
+                text: "Clear"
+                fontSize: Style.font.caption
+                tooltipText: "Use the app's default screenshots folder"
+                onClicked: {
+                  root.output = ""
+                  root.saveOption("output", "")
+                }
+                anchors.verticalCenter: parent.verticalCenter
+              }
+            }
+
+            HintText {
+              indentLabel: true
+              text: "Saved shots go here, created if missing. Clear to use the app default (" + (root.configManager ? root.configManager.defaultOutput : root.effectiveOutput) + "). A folder here also saves the shot, even when Save is not ticked."
+            }
+
+            // What the combination cannot do, in the app's own words.
+            Text {
+              visible: text !== ""
+              width: parent.width
+              text: root.launchWarnings ? root.launchWarnings.join("\n") : ""
+              color: Color.accent
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            // ===== Status =====
+            Text {
+              visible: root.statusText !== ""
+              width: parent.width
+              text: root.statusText
+              color: Color.accent
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
             }
 
         }
@@ -813,7 +867,7 @@ Item {
 
           Keys.onPressed: function(event) {
             if (event.key === Qt.Key_Escape) {
-              root.recordingDialogOpen = false
+              root.closeRecorder()
               event.accepted = true
               return
             }
@@ -992,7 +1046,7 @@ Item {
               id: recCancelBtn
               width: Math.max(recApplyBtn.implicitWidth, Style.space(120))
               text: "Cancel"
-              onClicked: root.recordingDialogOpen = false
+              onClicked: root.closeRecorder()
             }
 
             Button {
@@ -1046,6 +1100,7 @@ Item {
           Keys.onPressed: function(event) {
             if (event.key === Qt.Key_Escape) {
               root.zenityAskOpen = false
+              Qt.callLater(function() { panelKeyCatcher.forceActiveFocus() })
               event.accepted = true
             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
               root.installZenity()
@@ -1086,7 +1141,10 @@ Item {
             Button {
               width: Math.max(implicitWidth, Style.space(120))
               text: "Cancel"
-              onClicked: root.zenityAskOpen = false
+              onClicked: {
+                root.zenityAskOpen = false
+                Qt.callLater(function() { panelKeyCatcher.forceActiveFocus() })
+              }
             }
 
             Button {
@@ -1127,7 +1185,7 @@ Item {
       try {
         var s = JSON.parse(keyCheckOut.text)
         root.recordedConflict = s.conflict === true
-        root.recordedConflictMessage = s.conflict_message || ""
+        root.recordedConflictMessage = s.message || s.conflict_message || ""
         root.recordedSuggestions = s.suggestions || []
       } catch (e) {
         root.recordedConflict = false
@@ -1150,10 +1208,11 @@ Item {
       }
       if (ok) {
         // The record dialog closes itself once the chord is in.
-        if (root.recordingDialogOpen) root.recordingDialogOpen = false
+        if (root.recordingDialogOpen) root.closeRecorder()
         root.statusText = root.lastAppliedChord === ""
             ? "Keybinding removed."
             : "Keybinding applied: " + root.lastAppliedChord + " (" + root.modeName(root.recordingMode) + ")"
+        root.refreshStatus()
       } else {
         root.statusText = (r && r.error) ? r.error : "Could not apply the keybinding."
       }
@@ -1181,14 +1240,14 @@ Item {
           root.browseOutput()
           return
         }
+        root.externalFlowDone()
       }
-      root.externalFlowDone()
     }
   }
 
   Process {
     id: installZenityProc
-    command: ["foot", "-T", "Install zenity", "--", "sh", "-c",
+    command: ["xdg-terminal-exec", "--app-id=org.omarchy.terminal", "--title=Install zenity", "-e", "sh", "-c",
               "sudo pacman -S --noconfirm zenity; echo; echo 'Press Enter to close this window'; read -r _"]
     onExited: function(code) {
       // Terminal window closed — find out whether zenity arrived.

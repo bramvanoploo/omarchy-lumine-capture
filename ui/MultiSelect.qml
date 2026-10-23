@@ -140,15 +140,6 @@ Item {
   function recomputeFiltered() {
     // Vendored copy: the search field is gone, so the list is never filtered.
     filtered = resolvedOptions
-    return
-    var out = []
-    for (var i = 0; i < resolvedOptions.length; i++) {
-      var o = resolvedOptions[i]
-      if (o.label.toLowerCase().indexOf(q) !== -1
-          || o.description.toLowerCase().indexOf(q) !== -1
-          || o.value.toLowerCase().indexOf(q) !== -1) out.push(o)
-    }
-    filtered = out
   }
 
   function rebuildFromStatic() {

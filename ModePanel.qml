@@ -160,8 +160,10 @@ PopupCard {
           color: Util.alpha(Color.foreground, 0.55)
           font.family: Style.font.family
           font.pixelSize: Style.font.bodySmall
-          text: parseInt(root.configManager ? root.configManager.delay : "0", 10) > 0
-            ? parseInt(root.configManager.delay, 10) + "s" : "No delay"
+          text: {
+            var d = parseFloat(String(root.configManager ? root.configManager.delay : "0").replace(",", "."))
+            return (d > 0) ? d + "s" : "No delay"
+          }
         }
       }
 
@@ -175,7 +177,14 @@ PopupCard {
         tickCount: 11
         // The config re-reads the committed value back into `value`, so the
         // Binding element puts the knob back on the config after each drag.
-        Binding { target: delaySlider; property: "value"; value: parseInt(root.configManager ? root.configManager.delay : "0", 10) || 0 }
+        Binding {
+          target: delaySlider
+          property: "value"
+          value: {
+            var d = parseFloat(String(root.configManager ? root.configManager.delay : "0").replace(",", "."))
+            return isNaN(d) ? 0 : Math.max(0, Math.min(10, Math.round(d)))
+          }
+        }
         // Live drags only move the in-memory mirror the launcher reads;
         // saving the settings file on every pixel would hammer the disk.
         onMoved: function(v) { if (root.configManager) root.configManager.setDelay(String(Math.round(v))) }

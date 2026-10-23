@@ -8,9 +8,32 @@
 function stripComment(line) {
   var out = ""
   var inStr = false
+  var quoteChar = ""
+  var escaped = false
   for (var i = 0; i < line.length; i++) {
     var c = line.charAt(i)
-    if (c === '"' && (i === 0 || line.charAt(i - 1) !== "\\")) inStr = !inStr
+    if (escaped) {
+      out += c
+      escaped = false
+      continue
+    }
+    if (inStr && quoteChar === '"' && c === "\\") {
+      out += c
+      escaped = true
+      continue
+    }
+    if (!inStr && (c === '"' || c === "'")) {
+      inStr = true
+      quoteChar = c
+      out += c
+      continue
+    }
+    if (inStr && c === quoteChar) {
+      inStr = false
+      quoteChar = ""
+      out += c
+      continue
+    }
     if (c === "#" && !inStr) break
     out += c
   }
@@ -24,13 +47,19 @@ function parseValue(raw) {
   if (t.charAt(0) === '"') {
     try { return { kind: "str", val: JSON.parse(t) } } catch (e) { return { kind: "str", val: t.slice(1, -1) } }
   }
+  if (t.charAt(0) === "'" && t.length >= 2 && t.charAt(t.length - 1) === "'") {
+    return { kind: "str", val: t.slice(1, -1) }
+  }
   if (t.charAt(0) === "[") {
     var inner = t.slice(1, t.lastIndexOf("]"))
     var items = []
-    var cur = "", inStr = false
+    var cur = "", inStr = false, quoteChar = "", escaped = false
     for (var i = 0; i < inner.length; i++) {
       var c = inner.charAt(i)
-      if (c === '"' && (i === 0 || inner.charAt(i - 1) !== "\\")) inStr = !inStr
+      if (escaped) { cur += c; escaped = false; continue }
+      if (inStr && quoteChar === '"' && c === "\\") { cur += c; escaped = true; continue }
+      if (!inStr && (c === '"' || c === "'")) { inStr = true; quoteChar = c }
+      else if (inStr && c === quoteChar) { inStr = false; quoteChar = "" }
       if (c === "," && !inStr) { items.push(cur); cur = "" } else cur += c
     }
     if (cur.trim()) items.push(cur)
@@ -50,21 +79,25 @@ function parseValue(raw) {
 function parse(text) {
   var sections = []
   var current = null
-  var lines = String(text).split("\n")
+  var lines = String(text === undefined || text === null ? "" : text).split(/\r?\n/)
   for (var i = 0; i < lines.length; i++) {
     var line = stripComment(lines[i]).trim()
     if (!line) continue
     if (line.charAt(0) === "[") {
-      var name = line.slice(1, line.indexOf("]")).trim()
+      var closeIdx = line.indexOf("]")
+      var name = (closeIdx > 0 ? line.slice(1, closeIdx) : line.slice(1)).trim()
       current = { name: name, items: [] }
       sections.push(current)
       continue
     }
     var eq = -1
-    var inStr = false
+    var inStr = false, quoteChar = "", escaped = false
     for (var j = 0; j < line.length; j++) {
       var c = line.charAt(j)
-      if (c === '"' && (j === 0 || line.charAt(j - 1) !== "\\")) inStr = !inStr
+      if (escaped) { escaped = false; continue }
+      if (inStr && quoteChar === '"' && c === "\\") { escaped = true; continue }
+      if (!inStr && (c === '"' || c === "'")) { inStr = true; quoteChar = c }
+      else if (inStr && c === quoteChar) { inStr = false; quoteChar = "" }
       if (c === "=" && !inStr) { eq = j; break }
     }
     if (eq < 0 || !current) continue
@@ -119,7 +152,7 @@ function displayVal(item) {
 }
 
 function applyVal(item, text) {
-  if (item.kind === "bool") { item.val = (text === "true") } return
+  if (item.kind === "bool") { item.val = (text === "true"); return }
   if (item.kind === "num") {
     var t = text.trim()
     var n = Number(t)

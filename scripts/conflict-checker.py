@@ -23,16 +23,19 @@ MODE_LABELS = {"": "editor", "full": "full screen", "window": "window",
                "region": "region", "region-ocr": "region OCR"}
 
 MOD_MAP = {"super": 64, "mod4": 64, "logo": 64, "win": 64, "ctrl": 4, "control": 4, "shift": 1, "alt": 8, "mod1": 8}
+MOD_CANONICAL = {"super": "SUPER", "mod4": "SUPER", "logo": "SUPER", "win": "SUPER", "ctrl": "CTRL", "control": "CTRL", "shift": "SHIFT", "alt": "ALT", "mod1": "ALT"}
 
 KEY_ALIASES = {
     "BACKQUOTE": "GRAVE", "BACKTICK": "GRAVE", "ESC": "ESCAPE", "ENTER": "RETURN",
-    "DEL": "DELETE", "PGUP": "PAGEUP", "PGDN": "PAGEDOWN",
+    "DEL": "DELETE", "PGUP": "PAGEUP", "PGDN": "PAGEDOWN", "PRIOR": "PAGEUP", "NEXT": "PAGEDOWN",
+    "SYSRQ": "PRINT",
 }
 
 SAFE_KEY_EXTRA = {
     "SPACE", "GRAVE", "RETURN", "TAB", "ESCAPE", "BACKSPACE", "INSERT", "DELETE",
     "HOME", "END", "PAGEUP", "PAGEDOWN", "MINUS", "EQUAL", "COMMA", "PERIOD",
     "SLASH", "SEMICOLON", "APOSTROPHE", "BACKSLASH",
+    "LEFT", "RIGHT", "UP", "DOWN", "PRINT", "PAUSE",
 }
 
 
@@ -43,7 +46,7 @@ def is_safe_key(key):
         return True
     if re.fullmatch(r"[A-Z0-9]", key):
         return True
-    if re.fullmatch(r"F(?:[1-9]|1[0-2])", key):
+    if re.fullmatch(r"F(?:[1-9]|1[0-9]|2[0-4])", key):
         return True
     return False
 
@@ -56,19 +59,19 @@ def normalize_key_chord(chord_str):
     if not tokens:
         return None, 0, ""
     mods = 0
-    mod_names = []
+    mod_names = set()
     key = ""
     for token in tokens:
         tl = token.lower()
         if tl in MOD_MAP:
             mods |= MOD_MAP[tl]
-            mod_names.append(tl.upper())
+            mod_names.add(MOD_CANONICAL[tl])
         else:
             key = token.upper()
     key = KEY_ALIASES.get(key, key)
     if not is_safe_key(key):
         return None, 0, ""
-    return "+".join(sorted(mod_names)) + " + " + key if mod_names else key, mods, key
+    return " + ".join(sorted(mod_names)) + " + " + key if mod_names else key, mods, key
 
 
 def get_hyprctl_binds():
@@ -255,9 +258,19 @@ def apply_map(payload):
     live_block = live.group(0) if live else None
     cleaned = re.sub(r"\n*-- BEGIN " + re.escape(PLUGIN_ID) + r".*?-- END " + re.escape(PLUGIN_ID) + r"\n*", "\n", existing, flags=re.DOTALL).strip()
     block_lines = ["", f"-- BEGIN {PLUGIN_ID}"]
+    # Preserve existing hl.unbind(...) lines so previous take-overs keep working.
+    existing_unbinds = []
+    if live_block:
+        for m in re.finditer(r'hl\.unbind\(\s*["\']([^"\']+)["\']\s*\)', live_block):
+            u_norm, _, _ = normalize_key_chord(m.group(1))
+            if u_norm and u_norm not in existing_unbinds:
+                existing_unbinds.append(u_norm)
     if target_chord and unbind_conflicts:
         norm, _, _ = normalize_key_chord(target_chord)
-        block_lines.append(f'hl.unbind("{norm}")')
+        if norm and norm not in existing_unbinds:
+            existing_unbinds.append(norm)
+    for u_norm in existing_unbinds:
+        block_lines.append(f'hl.unbind("{u_norm}")')
     seen = set()
     for mode in MODE_ORDER:
         chord = (bindings.get(mode) or "").strip()
