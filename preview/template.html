@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>OmaLumineCapture Preview</title>
+<style>
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    background-color: #0b0e14;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", "Helvetica Neue", sans-serif;
+    color: #f1f5f9;
+    position: relative;
+    display: flex;
+    padding: 50px 60px;
+    gap: 45px;
+  }
+
+  /* Ambient glowing background */
+  .bg-glow-1 {
+    position: absolute;
+    width: 950px;
+    height: 950px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(56, 189, 248, 0.16) 0%, rgba(56, 189, 248, 0) 65%);
+    top: -240px;
+    left: -200px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .bg-glow-2 {
+    position: absolute;
+    width: 1050px;
+    height: 1050px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(168, 85, 247, 0.17) 0%, rgba(168, 85, 247, 0) 65%);
+    bottom: -260px;
+    right: 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .bg-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image: linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Left column */
+  .left-col {
+    position: relative;
+    z-index: 1;
+    width: 720px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .header {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .badge-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    background: rgba(56, 189, 248, 0.12);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.32);
+  }
+
+  .version-badge {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.06);
+    color: #94a3b8;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .platform-badge {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12.5px;
+    font-weight: 600;
+    background: rgba(168, 85, 247, 0.12);
+    color: #c084fc;
+    border: 1px solid rgba(168, 85, 247, 0.28);
+    letter-spacing: 0.05em;
+  }
+
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .icon-box {
+    width: 64px;
+    height: 64px;
+    background: linear-gradient(135deg, #1e293b, #0f172a);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    border-radius: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 12px 28px -6px rgba(56, 189, 248, 0.3);
+  }
+
+  .icon-box svg {
+    width: 36px;
+    height: 36px;
+    fill: #38bdf8;
+  }
+
+  h1 {
+    font-size: 54px;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    color: #ffffff;
+    line-height: 1;
+  }
+
+  .tagline {
+    font-size: 19px;
+    font-weight: 400;
+    color: #94a3b8;
+    line-height: 1.45;
+  }
+
+  /* Feature cards list */
+  .features {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 8px 0;
+  }
+
+  .feature-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 14px 18px;
+    background: rgba(18, 24, 38, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    backdrop-filter: blur(14px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  }
+
+  .feature-icon-wrap {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .feature-icon-wrap svg {
+    width: 22px;
+    height: 22px;
+    fill: #38bdf8;
+  }
+
+  .feature-body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .feature-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #f8fafc;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .feature-pill {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .feature-desc {
+    font-size: 13.5px;
+    color: #94a3b8;
+    line-height: 1.4;
+  }
+
+  .footer-note {
+    font-size: 13px;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Right column */
+  .right-col {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    height: 980px;
+  }
+
+  .preview-stack {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Settings Window (Top / Main in stack) */
+  .settings-card {
+    position: absolute;
+    top: 5px;
+    left: 0;
+    width: 980px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    box-shadow: 0 24px 60px -10px rgba(0, 0, 0, 0.75),
+                0 0 35px -5px rgba(56, 189, 248, 0.15);
+    background: #0f141d;
+    z-index: 1;
+  }
+
+  .window-topbar {
+    height: 36px;
+    background: #141a24;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 8px;
+  }
+
+  .window-btn {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+  }
+  .btn-close { background: #ef4444; }
+  .btn-min { background: #f59e0b; }
+  .btn-max { background: #10b981; }
+
+  .window-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-left: 8px;
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .settings-card img {
+    width: 100%;
+    display: block;
+  }
+
+  /* Mode Panel Window (Bottom-Right in stack) */
+  .mode-card {
+    position: absolute;
+    bottom: 20px;
+    right: 0;
+    width: 485px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid rgba(56, 189, 248, 0.5);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.9),
+                0 0 45px -5px rgba(56, 189, 248, 0.3);
+    background: #10141d;
+    z-index: 2;
+  }
+
+  .mode-topbar {
+    height: 36px;
+    background: #141a24;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+  }
+
+  .mode-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #38bdf8;
+    letter-spacing: 0.03em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mode-card img {
+    width: 100%;
+    display: block;
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-glow-1"></div>
+<div class="bg-glow-2"></div>
+<div class="bg-grid"></div>
+
+<!-- Left Column -->
+<div class="left-col">
+  <div class="header">
+    <div class="badge-row">
+      <div class="badge">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+        Omarchy Plugin
+      </div>
+      <div class="version-badge">v{{VERSION}}</div>
+      <div class="platform-badge">Wayland & Hyprland</div>
+    </div>
+
+    <div class="title-row">
+      <div class="icon-box">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/>
+          <path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/>
+        </svg>
+      </div>
+      <h1>OmaLumineCapture</h1>
+    </div>
+
+    <div class="tagline">
+      Wayland screenshot and annotation tool with built-in OCR, customizable shortcuts, per-mode options, and Omarchy theme synchronization.
+    </div>
+  </div>
+
+  <!-- Feature Cards List -->
+  <div class="features">
+
+    <!-- Keybindings & Conflict Checker -->
+    <div class="feature-card">
+      <div class="feature-icon-wrap">
+        <svg viewBox="0 0 24 24">
+          <path d="M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 4H5v-2h2v2zm0-3H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 7h-2v-2h2v2zm0-3h-2v-2h2v2zm0-3h-2V8h2v2z"/>
+        </svg>
+      </div>
+      <div class="feature-body">
+        <div class="feature-title">
+          Per-Mode Keybindings
+          <span class="feature-pill">Conflict Resolution</span>
+        </div>
+        <div class="feature-desc">
+          Global shortcuts for Editor, Full screen, Region, and Region OCR with interactive conflict detection, chord reassignment, and automatic conflict restoration.
+        </div>
+      </div>
+    </div>
+
+    <!-- On-Screen OCR -->
+    <div class="feature-card">
+      <div class="feature-icon-wrap">
+        <svg viewBox="0 0 24 24">
+          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+        </svg>
+      </div>
+      <div class="feature-body">
+        <div class="feature-title">
+          High-Speed OCR Engine
+          <span class="feature-pill">Tesseract Daemon</span>
+        </div>
+        <div class="feature-desc">
+          Instant OCR on region selection without interrupting your flow. Background daemon keeps the engine warm for zero-lag text recognition.
+        </div>
+      </div>
+    </div>
+
+    <!-- Finish Actions -->
+    <div class="feature-card">
+      <div class="feature-icon-wrap">
+        <svg viewBox="0 0 24 24">
+          <path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm-2 14l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/>
+        </svg>
+      </div>
+      <div class="feature-body">
+        <div class="feature-title">
+          Granular Finish Actions
+          <span class="feature-pill">Clipboard • Pin • Save</span>
+        </div>
+        <div class="feature-desc">
+          Configure exact finishing actions per mode or globally: copy to clipboard, pin to screen, save to folder, or pipe raw PNG to stdout.
+        </div>
+      </div>
+    </div>
+
+    <!-- Omarchy Theme Sync -->
+    <div class="feature-card">
+      <div class="feature-icon-wrap">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 3c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L4.35 19.4c-.39.39-.39 1.02 0 1.41.39.39 1.02.39 1.41 0l1.9-1.9C9.22 19.64 10.57 20 12 20c4.97 0 9-4.03 9-9s-4.03-9-9-9zm0 15c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"/>
+        </svg>
+      </div>
+      <div class="feature-body">
+        <div class="feature-title">
+          Theme Synchronization
+          <span class="feature-pill">Live Color Match</span>
+        </div>
+        <div class="feature-desc">
+          Automatically detects and synchronizes UI accent, panel borders, and marquee selection highlights with your active Omarchy system theme.
+        </div>
+      </div>
+    </div>
+
+    <!-- Automated AUR Installation -->
+    <div class="feature-card">
+      <div class="feature-icon-wrap">
+        <svg viewBox="0 0 24 24">
+          <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
+        </svg>
+      </div>
+      <div class="feature-body">
+        <div class="feature-title">
+          Automated AUR Setup
+          <span class="feature-pill">One-Click Install</span>
+        </div>
+        <div class="feature-desc">
+          Built-in installer for lumine-capture-bin with automatic detection, friendly dependency prompt, and seamless setup of the yay AUR helper.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footer-note">
+    <span>MIT License</span>
+    <span>•</span>
+    <span>Built for Omarchy Linux with Quickshell & Hyprland</span>
+  </div>
+</div>
+
+<!-- Right Column: Visual Previews Stack -->
+<div class="right-col">
+  <div class="preview-stack">
+
+    <!-- Configuration & Keybindings Panel (Top-Left in stack) -->
+    <div class="settings-card">
+      <div class="window-topbar">
+        <div class="window-btn btn-close"></div>
+        <div class="window-btn btn-min"></div>
+        <div class="window-btn btn-max"></div>
+        <span class="window-title">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+          </svg>
+          Configuration Panel — Right-click Bar Widget
+        </span>
+      </div>
+      <img src="settings_capture.png" alt="OmaLumineCapture Settings Panel">
+    </div>
+
+    <!-- Capture Mode Picker (Bottom-Right in stack) -->
+    <div class="mode-card">
+      <div class="mode-topbar">
+        <div class="mode-title">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
+            <path d="M4 4h3l2-2h6l2 2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/>
+          </svg>
+          Capture Mode Quick Picker
+        </div>
+        <div style="font-size: 11px; color: #64748b; font-weight: 500;">Left-click Bar Widget</div>
+      </div>
+      <img src="modepanel_capture.png" alt="OmaLumineCapture Mode Panel">
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

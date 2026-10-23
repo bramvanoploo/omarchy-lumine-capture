@@ -21,10 +21,7 @@ Item {
   property var keybindings: ({ "": "", "full": "", "window": "", "region": "", "region-ocr": "" })
   // Which capture mode the record dialog is assigning a shortcut for.
   property string recordingMode: ""
-  // Last chord the Apply/Take-over button sent, for the status line; and the
-  // silent flag so the silent start-up re-apply never writes a status line.
-  property string lastAppliedChord: ""
-  property bool silentReapply: false
+  property alias reapplyTimer: reapplyTimer
 
   // Mirrors of the launch options in ConfigManager, edited here and written
   // back one at a time.
@@ -134,13 +131,6 @@ Item {
       return !w.toLowerCase().startsWith("the daemon action")
     })
   }
-  readonly property string daemonHint: {
-    var daemon = configManager ? configManager.ocrDaemon || "" : ""
-    for (var i = 0; i < LaunchArgs.DAEMON_ACTIONS.length; i++) {
-      if (LaunchArgs.DAEMON_ACTIONS[i].value === daemon) return LaunchArgs.DAEMON_ACTIONS[i].hint
-    }
-    return ""
-  }
 
   function formatChordDisplay(chord) {
     if (!chord) return ""
@@ -236,8 +226,15 @@ Item {
     reapplyTimer.restart()
   }
 
+  property bool pendingSync: false
+
   function reapplyKeybinding() {
     if (!configManager) return
+    if (syncProc.running) {
+      pendingSync = true
+      return
+    }
+    pendingSync = false
     var payload = {
       args_by_mode: configManager.perModeArgs
     }
@@ -330,8 +327,8 @@ Item {
     id: overlayWindow
     visible: root.open
     // Sit on the screen the bar lives on.
-    screen: configManager && configManager.QsWindow && configManager.QsWindow.window
-            ? configManager.QsWindow.window.screen : null
+    screen: root.QsWindow && root.QsWindow.window
+            ? root.QsWindow.window.screen : null
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
     WlrLayershell.namespace: "lumine-capture-settings"
@@ -991,9 +988,11 @@ Item {
             }
             root.statusText = res.message || "Keybinding removed."
           } else {
+            if (configManager) root.keybindings = root.copyKeybindings(configManager.keybindings)
             root.statusText = (res && res.error) ? res.error : "Could not remove keybinding."
           }
         } catch (e) {
+          if (configManager) root.keybindings = root.copyKeybindings(configManager.keybindings)
           root.statusText = "Error removing keybinding."
         }
       }
@@ -1006,6 +1005,11 @@ Item {
   Process {
     id: syncProc
     stdout: StdioCollector { id: syncOut; waitForEnd: true }
+    onExited: function(code) {
+      if (root.pendingSync) {
+        root.reapplyKeybinding()
+      }
+    }
   }
 
   Timer {

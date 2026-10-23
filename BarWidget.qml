@@ -30,20 +30,21 @@ BarWidget {
 
   Component.onCompleted: {
     checkInstalledProc.running = true
-    reapplyTimer.restart()
   }
 
   Process {
     id: checkInstalledProc
-    command: ["pacman", "-Q", "lumine-capture-bin"]
+    command: ["bash", "-c", "pacman -Q lumine-capture-bin >/dev/null 2>&1 || command -v lumine-capture >/dev/null 2>&1"]
     onExited: function(exitCode) {
       root.isInstalled = (exitCode === 0)
+      if (!root.isInstalled && !checkYayProc.running) {
+        checkYayProc.running = true
+      }
       if (root.pendingOpen) {
         root.pendingOpen = false
         if (root.isInstalled) {
           root.launchCapture(root.pendingMode)
         } else {
-          checkYayProc.running = true
           root.depDialogOpen = true
         }
       }
@@ -145,14 +146,7 @@ BarWidget {
   // of keystrokes in a field writes once. Reached by the settings overlay
   // (via bar) and the mode panel's delay row; the log keeps it visible in the
   // journal.
-  property alias reapplyTimer: reapplyTimer
-
-  Timer {
-    id: reapplyTimer
-    interval: 900
-    repeat: false
-    onTriggered: settingsPopup.reapplyKeybinding()
-  }
+  property alias reapplyTimer: settingsPopup.reapplyTimer
 
   ModePanel {
     id: modePanel

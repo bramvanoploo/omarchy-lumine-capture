@@ -49,6 +49,16 @@ MOD_CANONICAL = {
 MOD_ORDER = {"SUPER": 0, "CTRL": 1, "ALT": 2, "SHIFT": 3}
 
 KEYCODE_TO_KEY = {
+    "CODE:10": "1",
+    "CODE:11": "2",
+    "CODE:12": "3",
+    "CODE:13": "4",
+    "CODE:14": "5",
+    "CODE:15": "6",
+    "CODE:16": "7",
+    "CODE:17": "8",
+    "CODE:18": "9",
+    "CODE:19": "0",
     "CODE:20": "MINUS",
     "CODE:21": "EQUAL",
     "CODE:34": "BRACKETLEFT",
@@ -114,6 +124,9 @@ def normalize_key_chord(chord_str):
             mods |= MOD_MAP[tl]
             mod_names.add(MOD_CANONICAL[tl])
         else:
+            if key:
+                # Reject multiple non-modifier keys in a single chord
+                return None, 0, ""
             key = token.upper()
     key = KEY_ALIASES.get(key, key)
     if not is_safe_key(key):
@@ -181,9 +194,15 @@ def write_settings(data):
         print(f"Error writing settings: {e}", file=sys.stderr)
 
 
+def _effective_user_hypr_dir():
+    if BINDINGS_LUA.parent != HYPR_DIR:
+        return BINDINGS_LUA.parent
+    return HYPR_DIR
+
+
 def extract_description_from_line(fn, rest, raw_line):
-    # 1. o.bind("...", "Description", ...)
-    if fn == "o.bind":
+    # 1. o.bind("...", "Description", ...) or o.bind_toggle("...", "Description", ...)
+    if fn in ("o.bind", "o.bind_toggle"):
         m = re.match(r'^\s*["\']([^"\']+)["\']', rest)
         if m:
             return m.group(1).strip()
@@ -213,6 +232,134 @@ def extract_description_from_line(fn, rest, raw_line):
     return ""
 
 
+def _iter_omarchy_loop_bindings(file_path, content, is_user):
+    """
+    Expands loop-generated bindings in Omarchy's default tiling.lua and utilities.lua
+    (workspaces 1..10, group windows 1..5, bar panels 1..9).
+    """
+    if 'Switch to workspace " .. workspace' in content:
+        for ws in range(1, 11):
+            code = f"code:{ws + 9}"
+            yield {
+                "raw_chord": f"SUPER + {code}",
+                "source_file": str(file_path),
+                "is_user_file": is_user,
+                "raw_line": f'o.bind("SUPER + {code}", "Switch to workspace {ws}", hl.dsp.focus({{ workspace = "{ws}" }}))',
+                "fn": "o.bind",
+                "rest": f'"Switch to workspace {ws}", hl.dsp.focus({{ workspace = "{ws}" }})',
+                "description": f"Switch to workspace {ws}",
+            }
+            yield {
+                "raw_chord": f"SUPER + SHIFT + {code}",
+                "source_file": str(file_path),
+                "is_user_file": is_user,
+                "raw_line": f'o.bind("SUPER + SHIFT + {code}", "Move window to workspace {ws}", hl.dsp.window.move({{ workspace = "{ws}" }}))',
+                "fn": "o.bind",
+                "rest": f'"Move window to workspace {ws}", hl.dsp.window.move({{ workspace = "{ws}" }})',
+                "description": f"Move window to workspace {ws}",
+            }
+            yield {
+                "raw_chord": f"SUPER + SHIFT + ALT + {code}",
+                "source_file": str(file_path),
+                "is_user_file": is_user,
+                "raw_line": f'o.bind("SUPER + SHIFT + ALT + {code}", "Move window silently to workspace {ws}", hl.dsp.window.move({{ workspace = "{ws}", follow = false }}))',
+                "fn": "o.bind",
+                "rest": f'"Move window silently to workspace {ws}", hl.dsp.window.move({{ workspace = "{ws}", follow = false }})',
+                "description": f"Move window silently to workspace {ws}",
+            }
+    if 'Switch to group window " .. index' in content:
+        for idx in range(1, 6):
+            code = f"code:{idx + 9}"
+            yield {
+                "raw_chord": f"SUPER + ALT + {code}",
+                "source_file": str(file_path),
+                "is_user_file": is_user,
+                "raw_line": f'o.bind("SUPER + ALT + {code}", "Switch to group window {idx}", hl.dsp.group.active({{ index = {idx} }}))',
+                "fn": "o.bind",
+                "rest": f'"Switch to group window {idx}", hl.dsp.group.active({{ index = {idx} }})',
+                "description": f"Switch to group window {idx}",
+            }
+    if 'Bar panel " .. panel' in content:
+        for panel in range(1, 10):
+            code = f"code:{panel + 9}"
+            yield {
+                "raw_chord": f"SUPER + CTRL + {code}",
+                "source_file": str(file_path),
+                "is_user_file": is_user,
+                "raw_line": f'o.bind("SUPER + CTRL + {code}", "Bar panel {panel}", "omarchy-shell -q shell togglePanelAt right {panel}")',
+                "fn": "o.bind",
+                "rest": f'"Bar panel {panel}", "omarchy-shell -q shell togglePanelAt right {panel}"',
+                "description": f"Bar panel {panel}",
+            }
+
+
+def collect_system_bindings():
+    """
+    Yields all (norm_chord, mods, key, source_info) entries found in user Hyprland
+    config files and Omarchy default binding files.
+    """
+    search_dirs = []
+    user_dir = _effective_user_hypr_dir()
+    if user_dir.exists():
+        search_dirs.append((user_dir, True))
+    if OMARCHY_DIR.exists():
+        search_dirs.append((OMARCHY_DIR, False))
+
+    for sdir, is_user in search_dirs:
+        for p in sorted(sdir.iterdir()):
+            if not p.is_file() or p.suffix not in (".lua", ".conf") or "bak" in p.name or ".tmp." in p.name:
+                continue
+            try:
+                content = p.read_text(encoding="utf-8")
+                if is_user:
+                    content = re.sub(r"-- BEGIN " + re.escape(PLUGIN_ID) + r".*?-- END " + re.escape(PLUGIN_ID), "", content, flags=re.DOTALL)
+                for line in content.splitlines():
+                    sline = line.strip()
+                    if sline.startswith("--") or sline.startswith("#"):
+                        continue
+                    m = re.match(r'((?:o\.bind(?:_toggle)?|hl\.bind))\s*\(\s*["\']([^"\']+)["\']\s*,\s*(.*)\)', sline)
+                    if m:
+                        raw_chord = m.group(2).strip()
+                        c_norm, c_mods, c_k = normalize_key_chord(raw_chord)
+                        if c_norm and c_k:
+                            fn = m.group(1)
+                            rest = m.group(3)
+                            desc = extract_description_from_line(fn, rest, sline)
+                            yield (c_norm, c_mods, c_k, {
+                                "source_file": str(p),
+                                "is_user_file": is_user,
+                                "raw_line": sline,
+                                "raw_chord": raw_chord,
+                                "fn": fn,
+                                "rest": rest,
+                                "description": desc
+                            })
+                        continue
+                    # Check conf format: bind = MOD, KEY, ...
+                    m_conf = re.match(r'bind[a-z]*\s*=\s*([^,]+),\s*([^,]+),\s*(.*)', sline)
+                    if m_conf:
+                        c_mod_str = m_conf.group(1).strip()
+                        c_k_str = m_conf.group(2).strip()
+                        c_chord = f"{c_mod_str} + {c_k_str}" if c_mod_str else c_k_str
+                        c_norm, c_mods, c_k = normalize_key_chord(c_chord)
+                        if c_norm and c_k:
+                            yield (c_norm, c_mods, c_k, {
+                                "source_file": str(p),
+                                "is_user_file": is_user,
+                                "raw_line": sline,
+                                "raw_chord": c_chord,
+                                "fn": "bind",
+                                "rest": m_conf.group(3).strip(),
+                                "description": m_conf.group(3).strip()
+                            })
+                for item in _iter_omarchy_loop_bindings(p, content, is_user):
+                    c_norm, c_mods, c_k = normalize_key_chord(item["raw_chord"])
+                    if c_norm and c_k:
+                        yield (c_norm, c_mods, c_k, item)
+            except Exception:
+                pass
+
+
 def find_system_binding_source(norm_chord):
     """
     Locates where norm_chord is bound in user Hyprland files or Omarchy defaults.
@@ -223,57 +370,9 @@ def find_system_binding_source(norm_chord):
     if not target_key:
         return None
 
-    search_dirs = []
-    if HYPR_DIR.exists():
-        search_dirs.append((HYPR_DIR, True))
-    if OMARCHY_DIR.exists():
-        search_dirs.append((OMARCHY_DIR, False))
-
-    for sdir, is_user in search_dirs:
-        for p in sdir.iterdir():
-            if not p.is_file() or p.suffix not in (".lua", ".conf") or "bak" in p.name:
-                continue
-            try:
-                content = p.read_text(encoding="utf-8")
-                if is_user:
-                    content = re.sub(r"-- BEGIN " + re.escape(PLUGIN_ID) + r".*?-- END " + re.escape(PLUGIN_ID), "", content, flags=re.DOTALL)
-                for line in content.splitlines():
-                    sline = line.strip()
-                    if sline.startswith("--") or sline.startswith("#"):
-                        continue
-                    m = re.match(r'((?:o\.bind|hl\.bind))\s*\(\s*["\']([^"\']+)["\']\s*,\s*(.*)\)', sline)
-                    if m:
-                        c_norm, c_mods, c_k = normalize_key_chord(m.group(2))
-                        if c_k == target_key and c_mods == target_mods:
-                            fn = m.group(1)
-                            rest = m.group(3)
-                            desc = extract_description_from_line(fn, rest, sline)
-                            return {
-                                "source_file": str(p),
-                                "is_user_file": is_user,
-                                "raw_line": sline,
-                                "fn": fn,
-                                "rest": rest,
-                                "description": desc
-                            }
-                    # Check conf format: bind = MOD, KEY, ...
-                    m_conf = re.match(r'bind\s*=\s*([^,]+),\s*([^,]+),\s*(.*)', sline)
-                    if m_conf:
-                        c_mod_str = m_conf.group(1).strip()
-                        c_k_str = m_conf.group(2).strip()
-                        c_chord = f"{c_mod_str} + {c_k_str}" if c_mod_str else c_k_str
-                        c_norm, c_mods, c_k = normalize_key_chord(c_chord)
-                        if c_k == target_key and c_mods == target_mods:
-                            return {
-                                "source_file": str(p),
-                                "is_user_file": is_user,
-                                "raw_line": sline,
-                                "fn": "bind",
-                                "rest": m_conf.group(3).strip(),
-                                "description": m_conf.group(3).strip()
-                            }
-            except Exception:
-                pass
+    for _, c_mods, c_k, info in collect_system_bindings():
+        if c_k == target_key and c_mods == target_mods:
+            return info
     return None
 
 
@@ -286,7 +385,6 @@ def generate_candidate_chords():
     ]
     keys_list = [
         "C", "S", "X", "P", "R", "A", "Z", "V", "W", "Q",
-        "1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
         "F8", "F9", "F10", "F11", "F12", "PRINT", "GRAVE"
     ]
     out = []
@@ -303,9 +401,28 @@ def find_free_suggestions(exclude_chord=None, extra_excludes=None, count=3):
         if norm_ex:
             taken.add(norm_ex)
 
-    bind_keys = {(int(b.get("modmask", 0)), str(b.get("key", "")).upper()) for b in get_hyprctl_binds()}
-    free = []
+    # Exclude all active plugin bindings
+    settings = read_settings()
+    for c in (settings.get("keybindings") or {}).values():
+        if c:
+            c_norm, _, _ = normalize_key_chord(c)
+            if c_norm:
+                taken.add(c_norm)
 
+    bind_keys = set()
+    for b in get_hyprctl_binds():
+        k_raw = str(b.get("key", "")).strip()
+        kc = int(b.get("keycode", 0) or 0)
+        if not k_raw and kc > 0:
+            k_raw = f"CODE:{kc}"
+        k_norm = KEY_ALIASES.get(k_raw.upper(), k_raw.upper())
+        if k_norm:
+            bind_keys.add((int(b.get("modmask", 0) or 0), k_norm))
+
+    for _, c_mods, c_k, _ in collect_system_bindings():
+        bind_keys.add((c_mods, c_k))
+
+    free = []
     for cand in generate_candidate_chords():
         norm, mods, key = normalize_key_chord(cand)
         if not norm or norm in taken:
@@ -376,7 +493,12 @@ def check_key_conflict(candidate_chord, target_mode=None):
         arg = b.get("arg", "") or ""
         if PLUGIN_ID in arg or PLUGIN_ID in desc or "lumine-capture" in arg:
             continue
-        if str(b.get("key", "")).upper() == target_key and int(b.get("modmask", 0)) == target_mods:
+        k_raw = str(b.get("key", "")).strip()
+        kc = int(b.get("keycode", 0) or 0)
+        if not k_raw and kc > 0:
+            k_raw = f"CODE:{kc}"
+        b_key = KEY_ALIASES.get(k_raw.upper(), k_raw.upper())
+        if b_key == target_key and int(b.get("modmask", 0) or 0) == target_mods:
             src_info = find_system_binding_source(norm)
             label = desc
             if not label and src_info and src_info.get("description"):
@@ -429,17 +551,18 @@ def restore_user_config_lines(target_mode):
     """
     Uncomments any lines in ~/.config/hypr/*.lua or *.conf commented out for target_mode.
     """
-    if not HYPR_DIR.exists():
+    user_dir = _effective_user_hypr_dir()
+    if not user_dir.exists():
         return
-    tag_prefix = f"-- Disabled by OmaLumineCapture (conflict resolution: {target_mode})"
-    for p in HYPR_DIR.iterdir():
-        if not p.is_file() or p.suffix not in (".lua", ".conf") or "bak" in p.name:
+    for p in user_dir.iterdir():
+        if not p.is_file() or p.suffix not in (".lua", ".conf") or "bak" in p.name or ".tmp." in p.name:
             continue
         try:
             content = p.read_text(encoding="utf-8")
-            if tag_prefix not in content and "-- Disabled by OmaLumineCapture" not in content:
+            if "Disabled by OmaLumineCapture" not in content:
                 continue
-            pattern = r'-- Disabled by OmaLumineCapture \(conflict resolution: ' + re.escape(target_mode) + r'\)\n-- ([^\n]+)'
+            prefix = r"(?:--|#)"
+            pattern = prefix + r' Disabled by OmaLumineCapture \(conflict resolution: ' + re.escape(target_mode) + r'\)\n' + prefix + r' ([^\n]+)'
             new_content = re.sub(pattern, r'\1', content)
             if new_content != content:
                 temp_f = p.with_suffix(f".tmp.{os.getpid()}")
@@ -454,12 +577,14 @@ def disable_user_config_line(norm_chord, target_mode):
     Comments out the conflicting line in ~/.config/hypr/*.lua or *.conf.
     """
     _, c_mods, c_k = normalize_key_chord(norm_chord)
-    if not HYPR_DIR.exists() or not c_k:
+    user_dir = _effective_user_hypr_dir()
+    if not user_dir.exists() or not c_k:
         return
-    for p in HYPR_DIR.iterdir():
-        if not p.is_file() or p.suffix not in (".lua", ".conf") or "bak" in p.name:
+    for p in user_dir.iterdir():
+        if not p.is_file() or p.suffix not in (".lua", ".conf") or "bak" in p.name or ".tmp." in p.name:
             continue
         try:
+            comment = "#" if p.suffix == ".conf" else "--"
             content = p.read_text(encoding="utf-8")
             parts = re.split(r"(-- BEGIN " + re.escape(PLUGIN_ID) + r".*?-- END " + re.escape(PLUGIN_ID) + r")", content, flags=re.DOTALL)
             changed = False
@@ -472,14 +597,26 @@ def disable_user_config_line(norm_chord, target_mode):
                     if sline.startswith("--") or sline.startswith("#"):
                         new_lines.append(line)
                         continue
-                    m = re.search(r'(?:o\.bind|hl\.bind)\s*\(\s*["\']([^"\']+)["\']', line)
+                    matched = False
+                    m = re.search(r'(?:o\.bind(?:_toggle)?|hl\.bind)\s*\(\s*["\']([^"\']+)["\']', line)
                     if m:
                         _, b_mods, b_key = normalize_key_chord(m.group(1))
                         if b_key == c_k and b_mods == c_mods:
-                            new_lines.append(f"-- Disabled by OmaLumineCapture (conflict resolution: {target_mode})")
-                            new_lines.append("-- " + line)
-                            changed = True
-                            continue
+                            matched = True
+                    elif p.suffix == ".conf":
+                        m_conf = re.match(r'bind[a-z]*\s*=\s*([^,]+),\s*([^,]+),', sline)
+                        if m_conf:
+                            c_mod_str = m_conf.group(1).strip()
+                            c_k_str = m_conf.group(2).strip()
+                            c_chord = f"{c_mod_str} + {c_k_str}" if c_mod_str else c_k_str
+                            _, b_mods, b_key = normalize_key_chord(c_chord)
+                            if b_key == c_k and b_mods == c_mods:
+                                matched = True
+                    if matched:
+                        new_lines.append(f"{comment} Disabled by OmaLumineCapture (conflict resolution: {target_mode})")
+                        new_lines.append(f"{comment} " + line)
+                        changed = True
+                        continue
                     new_lines.append(line)
                 parts[i] = "\n".join(new_lines)
             if changed:
@@ -494,7 +631,7 @@ def sanitize_args(raw):
     raw = (raw or "").strip()
     if not raw:
         return ""
-    if not re.fullmatch(r"[A-Za-z0-9 ._+=/@%:,'~-]*", raw):
+    if re.search(r'["`$\\|<>;\r\n&]', raw):
         return ""
     return raw
 
@@ -515,12 +652,15 @@ def write_hyprland_block(keybindings, conflict_resolutions, args_by_mode):
     for mode, cr in conflict_resolutions.items():
         if cr.get("owner_scope") == "system":
             orig = cr.get("original_chord")
+            src = cr.get("source_info") or {}
             if orig:
                 block_lines.append(f'hl.unbind("{orig}")')
+            raw_orig = src.get("raw_chord")
+            if raw_orig and raw_orig != orig and '"' not in raw_orig and "\\" not in raw_orig:
+                block_lines.append(f'hl.unbind("{raw_orig}")')
             if cr.get("action_type") == "reassign" and cr.get("reassigned_chord"):
                 reassigned = cr["reassigned_chord"]
-                src = cr.get("source_info")
-                if src and src.get("fn") and src.get("rest"):
+                if src and src.get("fn") and src.get("rest") and src.get("fn") != "bind":
                     fn = src["fn"]
                     rest = src["rest"]
                     block_lines.append(f'{fn}("{reassigned}", {rest})')
@@ -603,9 +743,11 @@ def handle_apply(payload):
     # 3. Process conflict resolution
     if resolution_type == "reassign":
         norm_reassigned, _, _ = normalize_key_chord(reassigned_chord)
+        if not norm_reassigned:
+            return {"success": False, "error": "Invalid replacement keybinding combination."}
         if conflicting_scope == "plugin":
             if other_mode:
-                keybindings[other_mode] = norm_reassigned or reassigned_chord
+                keybindings[other_mode] = norm_reassigned
             conflict_resolutions[mode] = {
                 "target_chord": norm_chord,
                 "owner": conflicting_owner,
@@ -613,18 +755,18 @@ def handle_apply(payload):
                 "other_mode": other_mode,
                 "original_chord": norm_chord,
                 "action_type": "reassign",
-                "reassigned_chord": norm_reassigned or reassigned_chord
+                "reassigned_chord": norm_reassigned
             }
         else:  # system
-            disable_user_config_line(norm_chord, mode)
             src = find_system_binding_source(norm_chord)
+            disable_user_config_line(norm_chord, mode)
             conflict_resolutions[mode] = {
                 "target_chord": norm_chord,
                 "owner": conflicting_owner,
                 "owner_scope": "system",
                 "original_chord": norm_chord,
                 "action_type": "reassign",
-                "reassigned_chord": norm_reassigned or reassigned_chord,
+                "reassigned_chord": norm_reassigned,
                 "source_info": src
             }
     elif resolution_type == "takeover":
@@ -641,8 +783,8 @@ def handle_apply(payload):
                 "reassigned_chord": ""
             }
         else:  # system
-            disable_user_config_line(norm_chord, mode)
             src = find_system_binding_source(norm_chord)
+            disable_user_config_line(norm_chord, mode)
             conflict_resolutions[mode] = {
                 "target_chord": norm_chord,
                 "owner": conflicting_owner,
@@ -652,9 +794,6 @@ def handle_apply(payload):
                 "reassigned_chord": "",
                 "source_info": src
             }
-    else:  # none
-        if mode in conflict_resolutions:
-            del conflict_resolutions[mode]
 
     # Save settings and write bindings.lua
     write_settings({

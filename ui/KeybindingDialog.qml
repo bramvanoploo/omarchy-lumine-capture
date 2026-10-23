@@ -116,7 +116,13 @@ Rectangle {
         return
       }
 
-      if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+      var mods = []
+      if (event.modifiers & Qt.MetaModifier) mods.push("SUPER")
+      if (event.modifiers & Qt.ControlModifier) mods.push("CTRL")
+      if (event.modifiers & Qt.AltModifier) mods.push("ALT")
+      if (event.modifiers & Qt.ShiftModifier) mods.push("SHIFT")
+
+      if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && mods.length === 0) {
         if (!root.hasConflict && root.hasValidChord && !root.isChecking && !root.isApplying) {
           root.applyNormal()
         } else if (root.hasConflict && root.selectedConflictNewChord !== "" && !root.isApplying) {
@@ -127,12 +133,6 @@ Rectangle {
         event.accepted = true
         return
       }
-
-      var mods = []
-      if (event.modifiers & Qt.MetaModifier) mods.push("SUPER")
-      if (event.modifiers & Qt.ControlModifier) mods.push("CTRL")
-      if (event.modifiers & Qt.AltModifier) mods.push("ALT")
-      if (event.modifiers & Qt.ShiftModifier) mods.push("SHIFT")
 
       var isModOnly = event.key === Qt.Key_Control || event.key === Qt.Key_Alt ||
                       event.key === Qt.Key_Meta || event.key === Qt.Key_Shift ||
@@ -217,19 +217,20 @@ Rectangle {
     if (key === Qt.Key_Backslash || key === Qt.Key_Bar) return "BACKSLASH"
     if (key === Qt.Key_QuoteLeft || key === Qt.Key_AsciiTilde) return "GRAVE"
 
-    // Fallback to scancodes for symbol keys
-    if (scanCode === 35 || scanCode === 27) return "BRACKETRIGHT"
-    if (scanCode === 34 || scanCode === 26) return "BRACKETLEFT"
-    if (scanCode === 20 || scanCode === 12) return "MINUS"
-    if (scanCode === 21 || scanCode === 13) return "EQUAL"
-    if (scanCode === 51 || scanCode === 43) return "BACKSLASH"
-    if (scanCode === 47 || scanCode === 39) return "SEMICOLON"
-    if (scanCode === 48 || scanCode === 40) return "APOSTROPHE"
-    if (scanCode === 49 || scanCode === 41) return "GRAVE"
-    if (scanCode === 59 || scanCode === 51) return "COMMA"
-    if (scanCode === 60 || scanCode === 52) return "PERIOD"
-    if (scanCode === 61 || scanCode === 53) return "SLASH"
+    // Fallback to XKB scancodes for symbol keys
+    if (scanCode === 35) return "BRACKETRIGHT"
+    if (scanCode === 34) return "BRACKETLEFT"
+    if (scanCode === 20) return "MINUS"
+    if (scanCode === 21) return "EQUAL"
+    if (scanCode === 51) return "BACKSLASH"
+    if (scanCode === 47) return "SEMICOLON"
+    if (scanCode === 48) return "APOSTROPHE"
+    if (scanCode === 49) return "GRAVE"
+    if (scanCode === 59) return "COMMA"
+    if (scanCode === 60) return "PERIOD"
+    if (scanCode === 61) return "SLASH"
 
+    if (key === Qt.Key_Return || key === Qt.Key_Enter) return "RETURN"
     if (key === Qt.Key_Space) return "SPACE"
     if (key === Qt.Key_Tab) return "TAB"
     if (key === Qt.Key_Backspace) return "BACKSPACE"
@@ -239,7 +240,8 @@ Rectangle {
     if (key === Qt.Key_End) return "END"
     if (key === Qt.Key_PageUp) return "PAGEUP"
     if (key === Qt.Key_PageDown) return "PAGEDOWN"
-    if (key === Qt.Key_Print) return "PRINT"
+    if (key === Qt.Key_Print || key === Qt.Key_SysReq) return "PRINT"
+    if (key === Qt.Key_Pause) return "PAUSE"
     if (key === Qt.Key_Left) return "LEFT"
     if (key === Qt.Key_Right) return "RIGHT"
     if (key === Qt.Key_Up) return "UP"
@@ -348,7 +350,7 @@ Rectangle {
 
         // Subtitle / current state
         Text {
-          text: "Current keybinding: " + (root.currentChord ? root.currentChord : "(none)")
+          text: "Current keybinding: " + (root.currentChord ? root.formatChordDisplay(root.currentChord) : "(none)")
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
           color: Color.muted
@@ -391,7 +393,7 @@ Rectangle {
             Text {
               width: parent.width
               text: root.modeLabel + " previously took over its keybinding from \u201c"
-                    + root.priorConflictOwner + "\u201d (original: " + root.priorConflictChord + "). "
+                    + root.priorConflictOwner + "\u201d (original: " + root.formatChordDisplay(root.priorConflictChord) + "). "
                     + "Would you like to restore \u201c" + root.priorConflictOwner + "\u201d back to its original keybinding?"
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
@@ -404,11 +406,11 @@ Rectangle {
 
               Button {
                 text: root.resetPriorConflictChoice
-                  ? "\u2611 Restore \u201c" + root.priorConflictOwner + "\u201d to " + root.priorConflictChord
-                  : "\u2610 Restore \u201c" + root.priorConflictOwner + "\u201d to " + root.priorConflictChord
+                  ? "\u2611 Restore \u201c" + root.priorConflictOwner + "\u201d to " + root.formatChordDisplay(root.priorConflictChord)
+                  : "\u2610 Restore \u201c" + root.priorConflictOwner + "\u201d to " + root.formatChordDisplay(root.priorConflictChord)
                 selected: root.resetPriorConflictChoice
                 fontSize: Style.font.caption
-                tooltipText: "Toggle whether to restore " + root.priorConflictOwner + " back to " + root.priorConflictChord
+                tooltipText: "Toggle whether to restore " + root.priorConflictOwner + " back to " + root.formatChordDisplay(root.priorConflictChord)
                 onClicked: {
                   root.resetPriorConflictChoice = !root.resetPriorConflictChoice
                 }
@@ -792,10 +794,10 @@ Rectangle {
       if (res && res.success === true) {
         root.applied(res)
       } else {
-        console.warn("Apply process returned error:", raw)
+        root.recordError = (res && res.error) ? res.error : "Failed to apply keybinding."
       }
     } catch (e) {
-      console.warn("Apply process error:", e, "Raw output:", raw)
+      root.recordError = "Failed to apply keybinding."
     }
   }
 }

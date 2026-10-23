@@ -12,7 +12,7 @@ QtObject {
   readonly property string homeDir: Quickshell.env("HOME") || ""
   property string version: "0.5.0"
   readonly property string pluginId: "bramvanoploo.omarchy-lumine-capture"
-  readonly property string configPath: (homeDir ? homeDir : "~") + "/.config/omarchy/plugins/" + pluginId + "/settings.json"
+  readonly property string configPath: (pluginDir ? pluginDir : (homeDir ? homeDir : "~") + "/.config/omarchy/plugins/" + pluginId) + "/settings.json"
   readonly property string conflictCheckerScript: pluginDir + "/scripts/conflict-checker.py"
   readonly property string installScript: pluginDir + "/scripts/install-dependency.sh"
   readonly property string themeSyncScript: pluginDir + "/scripts/sync-theme.py"
@@ -206,6 +206,8 @@ QtObject {
       }
       if (data.conflictResolutions !== undefined && typeof data.conflictResolutions === "object" && data.conflictResolutions !== null) {
         conflictResolutions = data.conflictResolutions
+      } else if (data.conflict_resolutions !== undefined && typeof data.conflict_resolutions === "object" && data.conflict_resolutions !== null) {
+        conflictResolutions = data.conflict_resolutions
       } else {
         conflictResolutions = ({})
       }

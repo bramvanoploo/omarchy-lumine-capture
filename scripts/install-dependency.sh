@@ -6,6 +6,7 @@ set -uo pipefail
 export YAY_DIR="${TMPDIR:-/tmp}/omalumine-yay-install-$$"
 
 xdg-terminal-exec --app-id=org.omarchy.terminal --title="OmaLumineCapture Setup" -e bash -c '
+  trap '\''rm -rf -- "$YAY_DIR"'\'' EXIT
   source omarchy-restart-gum 2>/dev/null || true
   omarchy-show-logo 2>/dev/null || true
 
@@ -29,7 +30,7 @@ xdg-terminal-exec --app-id=org.omarchy.terminal --title="OmaLumineCapture Setup"
 ' || true
 
 # Terminal closed: verify result and report back to the bar widget.
-if pacman -Q lumine-capture-bin >/dev/null 2>&1; then
+if pacman -Q lumine-capture-bin >/dev/null 2>&1 || command -v lumine-capture >/dev/null 2>&1; then
   if command -v omarchy-shell >/dev/null 2>&1; then
     omarchy-shell omalumine.bar installDone 2>/dev/null || true
   fi

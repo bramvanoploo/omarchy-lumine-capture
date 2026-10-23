@@ -14,9 +14,9 @@ No manual setup required: clicking the bar icon will guide you through installin
 
 ## Features
 
-- **Status bar icon** (camera). **Left-click** starts a capture; **right-click** opens the configuration panel.
+- **Status bar icon** (camera). **Left-click** opens the quick capture mode & delay picker; **right-click** opens the configuration panel.
 - **Automatic dependency install**: if `lumine-capture-bin` (AUR) is not installed, a confirmation dialog offers to install it. If the AUR helper `yay` is missing, it is explained and installed first. Installation runs in a terminal with `--noconfirm`.
-- **Global keybindings, one per capture mode, no shipped defaults**: customize your shortcuts in Settings without default chords applied automatically.
+- **Global keybindings, one per capture mode**: ships with conflict-free defaults (`SUPER + \` Editor, `SUPER + ]` Full screen, `SUPER + [` Region, `SUPER + SHIFT + [` Region OCR) and lets you customize each shortcut in Settings.
   - **Live conflict detection & resolution**: if a chosen shortcut is already in use, you are warned and offered three resolution paths:
     1. Change your keybinding (with suggested free alternatives).
     2. Change the conflicting keybinding (reassign it to suggested free alternatives).
@@ -97,16 +97,13 @@ node tests/launch-args.test.mjs
 node tests/lumine-config.test.mjs
 ```
 
-`preview.png` is rendered, not drawn by hand:
+`preview.png` is rendered from the templates and assets in `preview/`:
 
 ```bash
-scripts/render-preview.sh
+./preview/generate-preview.sh
 ```
 
-It photographs `docs/preview.html` with headless Chromium, tinted with the accent colours of the
-active Omarchy theme and versioned from `manifest.json`. The two images in `docs/` are real UI:
-refresh `shot-panel.png` after panel changes by opening the panel, running `grim`, and cropping the
-settings card (`1044x1610+2406+52` at this display scale).
+It renders `preview/template.html` with headless Chromium, versioned dynamically from `manifest.json`. The preview assets in `preview/` are real UI captures of OmaLumineCapture's configuration panel and mode picker. Pass `--capture` to re-capture live UI assets from Wayland.
 
 ## License
 

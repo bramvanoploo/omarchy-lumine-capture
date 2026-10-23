@@ -50,8 +50,8 @@ function parseValue(raw) {
   if (t.charAt(0) === "'" && t.length >= 2 && t.charAt(t.length - 1) === "'") {
     return { kind: "str", val: t.slice(1, -1) }
   }
-  if (t.charAt(0) === "[") {
-    var inner = t.slice(1, t.lastIndexOf("]"))
+  if (t.charAt(0) === "[" && t.charAt(t.length - 1) === "]") {
+    var inner = t.slice(1, -1)
     var items = []
     var cur = "", inStr = false, quoteChar = "", escaped = false
     for (var i = 0; i < inner.length; i++) {

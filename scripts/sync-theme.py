@@ -217,17 +217,15 @@ def patch(text, colors, theme_name):
     """Return text with [theme] color keys set to the mapped colors."""
     lines = text.split("\n")
     bounds = theme_section_bounds(lines)
+    marker = f"{MARKER}: {theme_name}" if theme_name else MARKER
 
     if bounds is None:
-        add = ["", "[theme]", MARKER]
+        add = ["", "[theme]", marker]
         add += [f'{k} = "{colors[k]}"' for k in COLOR_KEYS]
         body = text.rstrip("\n")
         return (body + "\n" if body else "") + "\n".join(add) + "\n"
 
     start, end = bounds
-    marker = f"{MARKER}"
-    if theme_name:
-        marker += f": {theme_name}"
     # Keep one marker line right under the header, refreshed in place.
     if start + 1 < end and lines[start + 1].strip().startswith("# Colors below are synced"):
         lines[start + 1] = marker
@@ -272,11 +270,14 @@ def theme_fingerprint():
 
 def write_state(fingerprint, colors, theme_name):
     try:
-        STATE_FILE.write_text(json.dumps({
+        payload = json.dumps({
             "fingerprint": fingerprint,
             "theme": theme_name,
             "colors": colors,
-        }, indent=2) + "\n", encoding="utf-8")
+        }, indent=2) + "\n"
+        temp_state = STATE_FILE.with_suffix(f".tmp.{os.getpid()}")
+        temp_state.write_text(payload, encoding="utf-8")
+        temp_state.replace(STATE_FILE)
     except OSError:
         pass
 
@@ -318,6 +319,10 @@ def do_sync(force):
         text = "# LumineCapture config, created by OmaLumineCapture theme sync.\n"
 
     patched = patch(text, colors, theme_name)
+    if exists and patched == text:
+        write_state(fingerprint, colors, theme_name)
+        return {"success": True, "changed": False, "theme": theme_name, "colors": colors}
+
     try:
         temp_cfg = LC_CONFIG.with_suffix(f".tmp.{os.getpid()}")
         temp_cfg.write_text(patched, encoding="utf-8")

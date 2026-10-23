@@ -14,6 +14,8 @@ PanelWindow {
   signal confirmed()
 
   visible: open
+  screen: root.parent && root.parent.QsWindow && root.parent.QsWindow.window
+          ? root.parent.QsWindow.window.screen : null
   anchors { top: true; bottom: true; left: true; right: true }
   color: "transparent"
   WlrLayershell.namespace: "omalumine-dependency-dialog"

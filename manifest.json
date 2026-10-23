@@ -20,15 +20,21 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "keybindings": { "": "", "full": "", "window": "", "region": "", "region-ocr": "" },
+      "keybindings": {
+        "": "SUPER + BACKSLASH",
+        "full": "SUPER + BRACKETRIGHT",
+        "window": "",
+        "region": "SUPER + BRACKETLEFT",
+        "region-ocr": "SUPER + SHIFT + BRACKETLEFT"
+      },
       "mode": "",
       "monitor": false,
-      "delay": "",
-      "to": "",
+      "delay": "0",
+      "to": "cs",
       "toNothing": false,
       "output": "",
       "nonotify": false,
-      "ocrDaemon": ""
+      "ocrDaemon": "serve"
     },
     "schema": [
       {

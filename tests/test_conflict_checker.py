@@ -19,12 +19,15 @@ class TestConflictCheckerNew(unittest.TestCase):
         self.tmp_bindings.write_text("-- test bindings\n", encoding="utf-8")
         self.tmp_settings.write_text(json.dumps({"keybindings": {}, "conflict_resolutions": {}}), encoding="utf-8")
         
+        self.orig_hypr_dir = cc.HYPR_DIR
         self.orig_bindings = cc.BINDINGS_LUA
         self.orig_settings = cc.SETTINGS_FILE
+        cc.HYPR_DIR = Path(self.tmpdir.name)
         cc.BINDINGS_LUA = self.tmp_bindings
         cc.SETTINGS_FILE = self.tmp_settings
 
     def tearDown(self):
+        cc.HYPR_DIR = self.orig_hypr_dir
         cc.BINDINGS_LUA = self.orig_bindings
         cc.SETTINGS_FILE = self.orig_settings
         self.tmpdir.cleanup()
@@ -53,6 +56,72 @@ class TestConflictCheckerNew(unittest.TestCase):
         # Modifier only must be rejected
         res_super = cc.check_key_conflict("SUPER")
         self.assertFalse(res_super["valid"])
+
+        # Multiple base keys must be rejected
+        res_multi_base = cc.check_key_conflict("SUPER + A + B")
+        self.assertFalse(res_multi_base["valid"])
+
+    def test_workspace_and_bind_toggle_conflicts(self):
+        # SUPER + 1 (code:10 in tiling.lua loop) should conflict with Switch to workspace 1
+        res_ws = cc.check_key_conflict("SUPER + 1")
+        self.assertTrue(res_ws["valid"])
+        self.assertTrue(res_ws["conflict"])
+        self.assertIn("workspace 1", res_ws["owner"].lower())
+
+        # SUPER + SHIFT + SPACE (o.bind_toggle in utilities.lua) should conflict
+        res_toggle = cc.check_key_conflict("SUPER + SHIFT + SPACE")
+        self.assertTrue(res_toggle["valid"])
+        self.assertTrue(res_toggle["conflict"])
+        self.assertIn("bar", res_toggle["owner"].lower())
+
+    def test_keep_prior_conflict_when_reset_false(self):
+        # 1. Apply conflict takeover on full
+        cc.handle_apply({
+            "mode": "full",
+            "chord": "SUPER + RETURN",
+            "resolution_type": "takeover",
+            "conflicting_owner": "Terminal",
+            "conflicting_scope": "system"
+        })
+        # 2. Change full to a new chord with reset_previous_conflict=False
+        res = cc.handle_apply({
+            "mode": "full",
+            "chord": "SUPER + ALT + C",
+            "resolution_type": "none",
+            "reset_previous_conflict": False
+        })
+        self.assertTrue(res["success"])
+        self.assertIn("full", res["conflict_resolutions"])
+        content = self.tmp_bindings.read_text(encoding="utf-8")
+        self.assertIn('hl.unbind("SUPER + RETURN")', content)
+
+    def test_user_file_disable_and_restore(self):
+        self.tmp_bindings.write_text('o.bind("SUPER + ALT + M", "My Custom App", "my-app")\n', encoding="utf-8")
+        res = cc.handle_apply({
+            "mode": "region",
+            "chord": "SUPER + ALT + M",
+            "resolution_type": "reassign",
+            "reassigned_chord": "SUPER + ALT + Z",
+            "conflicting_owner": "My Custom App",
+            "conflicting_scope": "system"
+        })
+        self.assertTrue(res["success"])
+        content = self.tmp_bindings.read_text(encoding="utf-8")
+        self.assertIn('-- Disabled by OmaLumineCapture (conflict resolution: region)', content)
+        self.assertIn('o.bind("SUPER + ALT + Z", "My Custom App", "my-app")', content)
+
+        # Removing region keybinding restores the user line
+        cc.handle_remove({"mode": "region"})
+        restored = self.tmp_bindings.read_text(encoding="utf-8")
+        self.assertNotIn('-- Disabled by OmaLumineCapture', restored)
+        self.assertIn('o.bind("SUPER + ALT + M", "My Custom App", "my-app")', restored)
+
+    def test_sanitize_args(self):
+        # Safe paths including parentheses are preserved
+        self.assertEqual(cc.sanitize_args("-r -o '/tmp/My (Shots)'"), "-r -o '/tmp/My (Shots)'")
+        # Injection attempts are rejected
+        self.assertEqual(cc.sanitize_args("-r; rm -rf /"), "")
+        self.assertEqual(cc.sanitize_args("-r $(whoami)"), "")
 
     def test_bracket_right_conflict(self):
         # SUPER + ALT + ] should conflict with Omarchy utilities.lua (code:35 - Make webcam overlay larger)

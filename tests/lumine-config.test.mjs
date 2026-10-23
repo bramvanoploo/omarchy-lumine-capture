@@ -42,6 +42,11 @@ eq("applyVal bool does not short-circuit num", (() => {
   api.applyVal(n, "42")
   return [b.val, n.val]
 })(), [true, "42"])
+eq("unclosed bracket is treated as plain string", api.value("[save]\ndirectory = [unclosed", "save", "directory"), "[unclosed")
+eq("inline string array round-trips", (() => {
+  const sections = api.parse('[ocr]\nlanguages = ["eng", "nld"]\n')
+  return api.displayVal(sections[0].items[0])
+})(), "eng, nld")
 
 console.log(failures ? `\n${failures} failed` : "\nall good")
 process.exit(failures ? 1 : 0)
