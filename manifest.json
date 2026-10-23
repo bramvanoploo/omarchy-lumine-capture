@@ -5,7 +5,7 @@
   "version": "0.5.0",
   "author": "Bram van Oploo",
   "license": "MIT",
-  "description": "LumineCapture integration for Omarchy: bar launcher with automatic AUR dependency installation, a conflict-checked global shortcut per capture mode, and a full configuration panel for LumineCapture",
+  "description": "A status bar plugin for LumineCapture, the fast, lightweight Wayland screenshot tool.",
   "kinds": [
     "bar-widget"
   ],
