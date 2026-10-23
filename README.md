@@ -31,7 +31,7 @@ act on.
 | Mode | none, `-f`, `-w`, `-r`, `-r ocr` | No mode opens the editor. |
 | Only the monitor under the pointer | `-m` | Nothing to do with `-w`: the app ignores it there. |
 | Delay | `-d <SECONDS>` | `3` or `0.5`; empty leaves the flag out. |
-| Send to | `-t <LETTERS>` | `c` copy, `p` pin, `s` save, `o` PNG to stdout, `r` primary selection. `r` only does something with `-r ocr`. Empty keeps the app's own `general.to`. |
+| Send to | `-t <LETTERS>` | `c` copy, `p` pin, `s` save, `o` PNG to stdout, `r` primary selection. `r` only does something with `-r ocr`. Empty keeps the app's own `general.to`, which the panel reads and shows as "App default: Copy, Save". |
 | Nothing happens when you finish | `-t` bare | Overrides `general.to`: finishing without an explicit choice does nothing. |
 | Output folder | `-o <DIR>` | Created if missing, and implies `s`. `~` is expanded so the global keybinding, which runs without a shell, gets the same path as the bar icon. |
 | No notifications for this launch | `-n` | The app's `[notifications]` setting is left alone. |
@@ -83,10 +83,12 @@ Then remove the `-- BEGIN bramvanoploo.omarchy-lumine-capture` block from `~/.co
 ## Development
 
 The argument builder and its reader are plain JS, so the mapping between options and
-flags is testable without a shell:
+flags is testable without a shell. The app's own defaults come from reading
+`~/.config/LumineCapture/config.toml`, also plain JS:
 
 ```bash
 node tests/launch-args.test.mjs
+node tests/lumine-config.test.mjs
 ```
 
 `preview.png` is rendered, not drawn by hand:

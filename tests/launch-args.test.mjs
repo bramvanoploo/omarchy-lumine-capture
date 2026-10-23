@@ -13,7 +13,7 @@ const src = readFileSync(path.join(here, "..", "LaunchArgs.js"), "utf8").replace
 // Top-level `function`/`var` declarations of the library live in the scope of
 // the wrapper, so hand the ones under test back out as an object.
 const names = ["MODES", "TO_OPTIONS", "TO_ORDER", "DAEMON_ACTIONS", "defaultOptions",
-  "normalizeDelay", "toLetters", "quotePath", "cleanPath", "buildArgs", "buildArgsForMode", "tokenize", "parseArgs", "modeArgv"]
+  "normalizeDelay", "toLetters", "toLabels", "quotePath", "cleanPath", "buildArgs", "buildArgsForMode", "tokenize", "parseArgs", "modeArgv"]
 const api = new Function(`"use strict"; ${src}; return {${names.join(", ")}}`)()
 
 let failures = 0
@@ -102,6 +102,12 @@ for (const c of cases) {
 eq("letters", api.TO_ORDER, ["c", "p", "s", "o", "r"])
 eq("letters are the option values", api.TO_OPTIONS.map(o => o.value), api.TO_ORDER)
 eq("daemon actions", api.DAEMON_ACTIONS.map(o => o.value), ["", "serve", "status", "stop", "calibrate"])
+
+// --- the app's own general.to, spelled out in the panel
+eq("to labels", api.toLabels("cs"), "Copy, Save")
+eq("to labels in canonical order", api.toLabels("sc"), "Copy, Save")
+eq("to labels drop unknown letters", api.toLabels("cx"), "Copy")
+eq("to labels of nothing", api.toLabels(""), "")
 eq("modes cover every mode flag", api.MODES.map(m => m.argv.join(" ")).sort(),
   ["", "-f", "-r", "-r ocr", "-w"].sort())
 

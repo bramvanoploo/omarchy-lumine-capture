@@ -8,11 +8,11 @@
   },
   "mode": "",
   "monitor": false,
-  "delay": "",
+  "delay": "0",
   "to": "",
   "toNothing": false,
-  "output": "",
+  "output": "/home/bram/Pictures/screenshots",
   "nonotify": false,
-  "ocrDaemon": "",
+  "ocrDaemon": "serve",
   "extraArgs": ""
 }

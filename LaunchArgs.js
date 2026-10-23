@@ -19,7 +19,7 @@
 // tests/launch-args.test.mjs.
 
 var MODES = [
-  { value: "", label: "Editor (no mode)", argv: [], hint: "Opens the editor: drag a selection, annotate, choose what to do." },
+  { value: "", label: "Editor", argv: [], hint: "Opens the editor: drag a selection, annotate, choose what to do." },
   { value: "full", label: "Full screen", argv: ["-f"], hint: "Grabs the whole screen at once, no editor." },
   { value: "window", label: "Active window", argv: ["-w"], hint: "Grabs the active window, no editor." },
   { value: "region", label: "Region", argv: ["-r"], hint: "Drag a region; releasing the mouse takes the shot, then does what Send to says." },
@@ -107,6 +107,19 @@ function toLetters(list) {
   }
   arr.sort(function (a, b) { return TO_ORDER.indexOf(a) - TO_ORDER.indexOf(b) })
   return arr.join("")
+}
+
+// "cs" -> "Copy, Save". The panel shows the app's own general.to like this, so
+// the letters in the config file and the words in the panel never drift apart.
+function toLabels(letters) {
+  var clean = toLetters([String(letters === undefined || letters === null ? "" : letters)])
+  var labels = []
+  for (var i = 0; i < clean.length; i++) {
+    for (var j = 0; j < TO_OPTIONS.length; j++) {
+      if (TO_OPTIONS[j].value === clean.charAt(i)) labels.push(TO_OPTIONS[j].label)
+    }
+  }
+  return labels.join(", ")
 }
 
 function quotePath(p) {
