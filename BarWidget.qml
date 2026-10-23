@@ -55,6 +55,14 @@ BarWidget {
     id: launchProc
     property string cmd: "lumine-capture"
     command: ["bash", "-c", cmd]
+    // A shot taken with a delay consumes it: reset to no delay afterwards.
+    // Only on success (exit 0) — a failed shot keeps the delay you set.
+    onExited: function(code) {
+      if (code === 0 && config.delay !== "" && config.delay !== "0") {
+        config.setDelay("0")
+        config.saveSettings({ "delay": "0" })
+      }
+    }
   }
 
   // "" means the mode from the launch options — the legacy entry points
@@ -125,6 +133,19 @@ BarWidget {
     return (home ? home : "~") + "/Pictures/screenshots"
   }
 
+  // Re-apply the shortcuts after a launch option changes, debounced so a run
+  // of keystrokes in a field writes once. Reached by the settings overlay
+  // (via bar) and the mode panel's delay row; the log keeps it visible in the
+  // journal.
+  property alias reapplyTimer: reapplyTimer
+
+  Timer {
+    id: reapplyTimer
+    interval: 900
+    repeat: false
+    onTriggered: settingsPopup.reapplyKeybinding()
+  }
+
   ModePanel {
     id: modePanel
     configManager: config
@@ -143,16 +164,19 @@ BarWidget {
       root.settingsOpen = true
     }
     onScreenshotsRequested: Qt.openUrlExternally("file://" + root.screenshotsDir)
+    // The delay feeds the shortcut commands, so re-apply them like the
+    // settings panel does after any launch option changes.
+    onDelayChanged: root.reapplyTimer.restart()
   }
 
   SettingsOverlay {
     id: settingsPopup
-    anchorItem: root
     bar: root.bar
-    owner: root
     configManager: config
     isInstalled: root.isInstalled
     open: root.settingsOpen
+    onClosed: root.settingsOpen = false
+    onExternalFlowDone: root.settingsOpen = true
   }
 
   DependencyDialog {

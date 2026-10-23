@@ -46,7 +46,7 @@
         "options": [
           {
             "value": "",
-            "label": "Editor (no mode)"
+            "label": "Editor"
           },
           {
             "value": "full",
@@ -132,7 +132,7 @@
       {
         "key": "nonotify",
         "type": "boolean",
-        "label": "No notifications for this launch",
+        "label": "No notifications",
         "description": "Skip the saved / copied / OCR outcome notifications.",
         "defaultValue": false
       },

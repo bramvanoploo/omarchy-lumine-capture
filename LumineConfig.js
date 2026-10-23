@@ -75,6 +75,21 @@ function parse(text) {
   return sections
 }
 
+// A single value as text, "" when the section or key is absent. The settings
+// panel reads the app's own defaults with this; it never writes them back.
+function value(text, section, key) {
+  var sections = parse(text)
+  for (var i = 0; i < sections.length; i++) {
+    if (sections[i].name !== section) continue
+    var items = sections[i].items
+    for (var j = 0; j < items.length; j++) {
+      if (items[j].key === key) return String(items[j].val)
+    }
+    return ""
+  }
+  return ""
+}
+
 function encodeVal(item) {
   if (item.kind === "bool") return item.val ? "true" : "false"
   if (item.kind === "num") return String(item.val)

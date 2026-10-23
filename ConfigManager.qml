@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import "LaunchArgs.js" as LaunchArgs
+import "LumineConfig.js" as LumineConfig
 
 QtObject {
   id: root
@@ -29,6 +30,9 @@ QtObject {
   property bool monitor: false           // -m, --monitor
   property string delay: ""              // -d, --delay <SECONDS>; "" = no flag
   property string to: ""                 // -t, --to <LETTERS>; "" = general.to of the app
+  // general.to read from the app's own config, for the panel to show what an
+  // untouched "Send to" means. "" when the app config is missing or has no to.
+  property string appTo: ""
   property bool toNothing: false         // -t bare: do nothing by default
   property string output: ""             // -o, --output <DIR>; "" = the app's own folder
   property bool nonotify: false          // -n, --nonotify
@@ -259,6 +263,7 @@ QtObject {
   Component.onCompleted: {
     settingsFile.reload()
     manifestFile.reload()
+    appConfigFile.reload()
   }
 
   property var _settingsFile: FileView {
@@ -279,6 +284,17 @@ QtObject {
     printErrors: false
     onLoaded: root.themeName = text().trim()
     onLoadFailed: root.themeName = ""
+    onFileChanged: reload()
+  }
+
+  // The app's config is the source of truth for its defaults; we read it, never write it.
+  property var _appConfigFile: FileView {
+    id: appConfigFile
+    path: (homeDir ? homeDir : "~") + "/.config/LumineCapture/config.toml"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.appTo = LumineConfig.value(text(), "general", "to")
+    onLoadFailed: root.appTo = ""
     onFileChanged: reload()
   }
 

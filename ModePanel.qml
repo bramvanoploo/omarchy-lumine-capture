@@ -39,6 +39,9 @@ PopupCard {
   signal picked(string mode)
   signal settingsRequested()
   signal screenshotsRequested()
+  // The shot delay was edited; the owner re-applies the shortcuts so the
+  // chords run commands with the new -d flag.
+  signal delayChanged()
 
   // Fixed sizes: the rows bind their width off the delegates, so deriving
   // button widths from the rows would be a binding loop (zero widths).
@@ -54,7 +57,7 @@ PopupCard {
   // The card hugs the capture-mode row: contentWidth = that row exactly.
   contentWidth: fittedContentWidth(rowWidth + padding * 2)
   contentHeight: fittedContentHeight(headerRow.height + Style.space(8) + modeBtnHeight
-    + Style.space(8) + actionBtnHeight)
+    + Style.space(8) + delayColumn.height + Style.space(8) + actionBtnHeight)
 
   contentItem: Column {
     // The card's inner area: contentWidth includes the padding.
@@ -130,6 +133,60 @@ PopupCard {
           tooltipText: modelData.label + " — " + (root.modeHints[modelData.value] || "")
             + (root.chords[modelData.value] ? "\nShortcut: " + root.chords[modelData.value] : "\nNo shortcut")
           onClicked: root.picked(modelData.value)
+        }
+      }
+    }
+
+    // --- shot delay, between the modes and the actions ---
+    Column {
+      id: delayColumn
+      width: parent.width
+      spacing: Style.space(2)
+
+      Row {
+        width: parent.width
+        spacing: Style.space(4)
+        Text {
+          text: "Delay"
+          color: Color.foreground
+          font.family: Style.font.family
+          font.pixelSize: Style.font.bodySmall
+        }
+        Text {
+          width: parent.width - parent.children[0].implicitWidth - parent.children[2].implicitWidth - parent.spacing * 2
+          text: ""
+        }
+        Text {
+          color: Util.alpha(Color.foreground, 0.55)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.bodySmall
+          text: parseInt(root.configManager ? root.configManager.delay : "0", 10) > 0
+            ? parseInt(root.configManager.delay, 10) + "s" : "No delay"
+        }
+      }
+
+      PanelSlider {
+        id: delaySlider
+        bar: root.bar
+        width: parent.width
+        minimum: 0
+        maximum: 10
+        integer: true // snap to whole seconds
+        tickCount: 11
+        // The config re-reads the committed value back into `value`, so the
+        // Binding element puts the knob back on the config after each drag.
+        Binding { target: delaySlider; property: "value"; value: parseInt(root.configManager ? root.configManager.delay : "0", 10) || 0 }
+        // Live drags only move the in-memory mirror the launcher reads;
+        // saving the settings file on every pixel would hammer the disk.
+        onMoved: function(v) { if (root.configManager) root.configManager.setDelay(String(Math.round(v))) }
+        onReleased: function(v) {
+          if (!root.configManager) return
+          var next = String(Math.round(v))
+          if (next !== root.configManager.delay) root.configManager.setDelay(next)
+          var patch = {}
+          patch["delay"] = next
+          root.configManager.saveSettings(patch)
+          root.delayChanged()
         }
       }
     }
