@@ -133,7 +133,7 @@
   .hero-label { left: 780px; top: 62px; }
 
   .hero-note {
-    position: absolute; left: 780px; top: 812px; width: 660px;
+    position: absolute; left: 780px; top: 812px; width: 460px;
     font-family: var(--sans); font-size: 14px; line-height: 1.5;
     color: rgba(var(--fg-rgb), 0.5);
   }
@@ -177,16 +177,29 @@
   .label.chip .key { font-size: 12px; }
 
   /* the settings panel floats over the region-selection shot, top edge under
-     the marquee, right edge aligned with it, bottom edge near the card floor */
-  .panel-label { left: 1480px; top: 386px; }
+     the marquee, right edge aligned with it; the mode panel sits below it */
+  /* the two panel shots are crops of the same 3456x2160 screen, so at one
+     common scale the mode panel (584 native px) is 584/1520 = 0.384 of the
+     settings panel width: 178px next to 462px */
+  .panel-label { left: 1418px; top: 631px; }
   .panel {
-    position: absolute; left: 1480px; top: 430px; width: 380px; z-index: 5;
+    position: absolute; left: 1418px; top: 675px; width: 462px; z-index: 5;
     border-radius: 12px; overflow: hidden;
     border: 1px solid rgba(var(--accent-rgb), 0.34);
     box-shadow: 0 22px 52px rgba(0, 0, 0, 0.6);
     background: rgba(8, 12, 18, 0.9);
   }
   .panel img { width: 100%; display: block; }
+
+  .mode-label { left: 1652px; top: 82px; }
+  .mode {
+    position: absolute; left: 1652px; top: 126px; width: 178px; z-index: 5;
+    border-radius: 8px; overflow: hidden;
+    border: 1px solid rgba(var(--accent-rgb), 0.34);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+    background: rgba(8, 12, 18, 0.9);
+  }
+  .mode img { width: 100%; display: block; }
 
   .footer {
     position: absolute; left: 60px; bottom: 40px;
@@ -295,5 +308,8 @@
 
 <div class="label chip panel-label">CONFIG PANEL <span class="key">RIGHT CLICK</span></div>
 <div class="panel"><img src="shot-panel.png" alt="OmaLumineCapture settings panel"></div>
+
+<div class="label chip mode-label">MODE PANEL <span class="key">LEFT CLICK</span></div>
+<div class="mode"><img src="shot-modepanel.png" alt="OmaLumineCapture capture-mode panel"></div>
 
 <div class="footer">MIT License <span>·</span> Built for Omarchy Linux with Quickshell + Hyprland</div>
