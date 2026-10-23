@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "bramvanoploo.omarchy-lumine-capture",
   "name": "OmaLumineCapture",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": "Bram van Oploo",
   "license": "MIT",
   "description": "LumineCapture integration for Omarchy: bar launcher with automatic AUR dependency installation, a conflict-checked global shortcut per capture mode, and a full configuration panel for LumineCapture",

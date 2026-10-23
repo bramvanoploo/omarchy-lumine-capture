@@ -1,15 +1,16 @@
 {
   "keybindings": {
-    "": "",
-    "full": "",
+    "": "SUPER + BACKSLASH",
+    "full": "SUPER + BRACKETRIGHT",
     "window": "",
-    "region": "",
-    "region-ocr": ""
+    "region": "SUPER + BRACKETLEFT",
+    "region-ocr": "SUPER + SHIFT + BRACKETLEFT"
   },
+  "conflictResolutions": {},
   "mode": "",
   "monitor": false,
   "delay": "0",
-  "to": "",
+  "to": "cs",
   "toNothing": false,
   "output": "/home/bram/Pictures/screenshots",
   "nonotify": false,

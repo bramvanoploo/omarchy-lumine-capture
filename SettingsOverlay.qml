@@ -52,7 +52,7 @@ Item {
   // way the Output folder shows the effective path. Derived, not seeded: the
   // app config arrives on its own FileView, later than the settings file.
   readonly property var toSelection: (to !== "" ? to
-    : (configManager ? configManager.appTo : "")).split("")
+    : (configManager ? configManager.effectiveTo : "cs")).split("")
 
   // What the app itself is set to do, read from general.to of its own config.
   // The panel shows it while "Send to" holds no user choice, the way the
@@ -72,18 +72,10 @@ Item {
   property string ocrStatus: ""
   property string pendingOcrAction: ""
 
-  property bool suggestedKeyConflict: false
-  property string suggestedKeyConflictMessage: ""
   property string statusText: ""
 
-  // Record-key dialog: recording, live conflict check, suggested
-  // alternatives, and take-over of a conflicting binding.
+  // Keybinding custom dialog state
   property bool recordingDialogOpen: false
-  property string recordedChord: ""
-  property bool recordedConflict: false
-  property string recordedConflictMessage: ""
-  property var recordedSuggestions: []
-  property bool isCheckingRecordedKey: false
 
   // Open state, driven by the bar widget (clicks, IPC).
   property bool open: false
@@ -136,13 +128,34 @@ Item {
 
   // The launch options LumineCapture will be started with.
   readonly property string launchArgs: configManager ? configManager.launchArgs : ""
-  readonly property var launchWarnings: configManager ? configManager.launchWarnings : []
+  readonly property var launchWarnings: {
+    if (!configManager || !configManager.launchWarnings) return []
+    return configManager.launchWarnings.filter(function(w) {
+      return !w.toLowerCase().startsWith("the daemon action")
+    })
+  }
   readonly property string daemonHint: {
     var daemon = configManager ? configManager.ocrDaemon || "" : ""
     for (var i = 0; i < LaunchArgs.DAEMON_ACTIONS.length; i++) {
       if (LaunchArgs.DAEMON_ACTIONS[i].value === daemon) return LaunchArgs.DAEMON_ACTIONS[i].hint
     }
     return ""
+  }
+
+  function formatChordDisplay(chord) {
+    if (!chord) return ""
+    return chord
+      .replace(/\bBRACKETRIGHT\b/g, "]")
+      .replace(/\bBRACKETLEFT\b/g, "[")
+      .replace(/\bMINUS\b/g, "-")
+      .replace(/\bEQUAL\b/g, "=")
+      .replace(/\bSEMICOLON\b/g, ";")
+      .replace(/\bAPOSTROPHE\b/g, "'")
+      .replace(/\bCOMMA\b/g, ",")
+      .replace(/\bPERIOD\b/g, ".")
+      .replace(/\bSLASH\b/g, "/")
+      .replace(/\bBACKSLASH\b/g, "\\")
+      .replace(/\bGRAVE\b/g, "`")
   }
 
   readonly property string ocrStatusText: {
@@ -152,7 +165,10 @@ Item {
       if (pendingOcrAction === "calibrate") return "OCR daemon: measuring this machine, a few seconds\u2026"
       return "OCR daemon: " + pendingOcrAction + "\u2026"
     }
-    if (ocrStatus === "stopped") return "OCR daemon: not running"
+    if (ocrStatus === "stopped") {
+      if (daemonOn) return "OCR daemon: enabled (idle/standby)"
+      return "OCR daemon: disabled"
+    }
     return ""
   }
 
@@ -181,50 +197,36 @@ Item {
     return mode
   }
 
+  function hasConflictResolution(mode) {
+    if (!configManager || !configManager.conflictResolutions) return false
+    return !!configManager.conflictResolutions[mode]
+  }
+
   function openRecorder(mode) {
+    if (mode === "window") return
     recordingMode = mode
-    recordedChord = ""
-    recordedConflict = false
-    recordedConflictMessage = ""
-    recordedSuggestions = []
-    isCheckingRecordedKey = false
     recordingDialogOpen = true
-    Qt.callLater(function() { recordKeyCatcher.forceActiveFocus() })
   }
 
-  function closeRecorder() {
-    recordingDialogOpen = false
-    Qt.callLater(function() { panelKeyCatcher.forceActiveFocus() })
-  }
+  property bool isRemovingKey: false
 
-  function checkRecordedKey(chord) {
-    if (!configManager || !chord) return
-    isCheckingRecordedKey = true
-    keyCheckProc.command = [configManager.conflictCheckerScript, "check-key", chord]
-    keyCheckProc.running = true
-  }
+  function removeKeybinding(mode) {
+    if (!configManager || isRemovingKey) return
+    isRemovingKey = true
 
-  function applyBinding(chord, unbind) {
-    if (!configManager) return
-    var map = copyKeybindings(configManager.keybindings)
-    map[recordingMode] = chord
-    keybindings = map
-    lastAppliedChord = chord
-    silentReapply = false
-    configManager.saveSettings({ keybindings: map })
+    // Optimistically update UI immediately so removal is instantaneous
+    var next = root.copyKeybindings(root.keybindings)
+    next[mode] = ""
+    root.keybindings = next
+
     var payload = {
-      bindings: map,
-      args_by_mode: configManager.perModeArgs,
-      mode: recordingMode,
-      unbind_conflicts: unbind
+      mode: mode,
+      args_by_mode: configManager.perModeArgs
     }
-    applyProc.command = [configManager.conflictCheckerScript, "apply-map", JSON.stringify(payload)]
-    applyProc.running = true
+    removeProc.command = [configManager.conflictCheckerScript, "remove-key", JSON.stringify(payload)]
+    removeProc.running = true
   }
 
-  // Write one option, then let the global shortcuts pick it up. The exec
-  // commands in bindings.lua are fixed strings, so they are rewritten once the
-  // typing settles.
   function saveOption(key, value) {
     if (!configManager) return
     var patch = {}
@@ -234,39 +236,17 @@ Item {
     reapplyTimer.restart()
   }
 
-  // Rewrite the shortcuts so they run the commands the options add up to. The
-  // chords come from the settings, not from the panel's copy of them: this runs
-  // at shell start too, before the panel has ever been opened.
   function reapplyKeybinding() {
     if (!configManager) return
-    var map = configManager.keybindings || {}
-    var any = false
-    var list = LaunchArgs.MODES
-    for (var i = 0; i < list.length; i++) {
-      var chord = String(map[list[i].value] || "").trim()
-      if (chord !== "" && chord.toLowerCase() !== "none") {
-        any = true
-        break
-      }
-    }
-    if (!any) return
     var payload = {
-      bindings: map,
-      args_by_mode: configManager.perModeArgs,
-      mode: "",
-      unbind_conflicts: false
+      args_by_mode: configManager.perModeArgs
     }
-    applyProc.command = [configManager.conflictCheckerScript, "apply-map", JSON.stringify(payload)]
-    silentReapply = true
-    applyProc.running = true
+    syncProc.command = [configManager.conflictCheckerScript, "sync", JSON.stringify(payload)]
+    syncProc.running = true
   }
 
   function saveToLetters(values) {
     var letters = LaunchArgs.toLetters(values)
-    // Picking exactly what the app already does keeps the option empty, so the
-    // row keeps following LumineCapture when its config changes.
-    var app = configManager ? configManager.appTo || "" : ""
-    if (LaunchArgs.toLetters(letters.split("")) === LaunchArgs.toLetters(app.split(""))) letters = ""
     to = letters
     saveOption("to", letters)
   }
@@ -343,27 +323,6 @@ Item {
     ocrStatusProc.running = true
   }
 
-  // ---------- key chord recorder ----------
-
-  function recordedKeyStr(k, text) {
-    if (k >= Qt.Key_A && k <= Qt.Key_Z) return String.fromCharCode(k)
-    if (k >= Qt.Key_0 && k <= Qt.Key_9) return String.fromCharCode(k)
-    if (k >= Qt.Key_F1 && k <= Qt.Key_F24) return "F" + (k - Qt.Key_F1 + 1)
-    var map = {}
-    map[Qt.Key_Space] = "SPACE"; map[Qt.Key_Escape] = "ESCAPE"; map[Qt.Key_Return] = "RETURN"
-    map[Qt.Key_Enter] = "RETURN"; map[Qt.Key_Tab] = "TAB"; map[Qt.Key_Backspace] = "BACKSPACE"
-    map[Qt.Key_Delete] = "DELETE"; map[Qt.Key_Insert] = "INSERT"; map[Qt.Key_Home] = "HOME"
-    map[Qt.Key_End] = "END"; map[Qt.Key_PageUp] = "PAGEUP"; map[Qt.Key_PageDown] = "PAGEDOWN"
-    map[Qt.Key_Left] = "LEFT"; map[Qt.Key_Right] = "RIGHT"; map[Qt.Key_Up] = "UP"; map[Qt.Key_Down] = "DOWN"
-    map[Qt.Key_Print] = "PRINT"; map[Qt.Key_SysReq] = "PRINT"; map[Qt.Key_Pause] = "PAUSE"
-    map[Qt.Key_Grave] = "GRAVE"; map[Qt.Key_Minus] = "MINUS"; map[Qt.Key_Equal] = "EQUAL"
-    map[Qt.Key_Comma] = "COMMA"; map[Qt.Key_Period] = "PERIOD"; map[Qt.Key_Slash] = "SLASH"
-    map[Qt.Key_Semicolon] = "SEMICOLON"; map[Qt.Key_Apostrophe] = "APOSTROPHE"; map[Qt.Key_Backslash] = "BACKSLASH"
-    if (map[k]) return map[k]
-    if (text && text.length === 1 && text !== " ") return text.toUpperCase()
-    return ""
-  }
-
   // =========================================================================
   // THE OVERLAY
   // =========================================================================
@@ -389,7 +348,7 @@ Item {
       Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape) {
           if (root.zenityAskOpen) { root.zenityAskOpen = false; Qt.callLater(function() { panelKeyCatcher.forceActiveFocus() }) }
-          else if (root.recordingDialogOpen) root.closeRecorder()
+          else if (root.recordingDialogOpen) { root.recordingDialogOpen = false; Qt.callLater(function() { panelKeyCatcher.forceActiveFocus() }) }
           else root.close()
           event.accepted = true
         }
@@ -501,7 +460,7 @@ Item {
               Text {
                 visible: root.ocrStatusText !== ""
                 text: root.ocrStatusText
-                color: root.ocrStatus === "running" ? Color.accent : Color.muted
+                color: (root.daemonOn || root.ocrStatus === "running") ? Color.accent : Color.muted
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
               }
@@ -583,71 +542,93 @@ Item {
               Repeater {
                 model: LaunchArgs.MODES
 
-                Row {
+                Item {
+                  id: modeRowWrapper
                   required property var modelData
+                  readonly property bool isWindowMode: modelData.value === "window"
                   width: parent.width
-                  spacing: Style.space(8)
+                  implicitHeight: modeRow.implicitHeight
+                  opacity: isWindowMode ? 0.45 : 1.0
 
-                  Text {
-                    width: Style.space(120)
-                    text: modelData.label
-                    color: Color.foreground
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.bodySmall
-                    anchors.verticalCenter: parent.verticalCenter
-                  }
-
-                  BorderSurface {
-                    implicitWidth: Math.max(kbText.implicitWidth + Style.space(20), Style.space(150))
-                    implicitHeight: Style.space(28)
-                    color: Util.alpha(Color.foreground, 0.06)
-                    borderSpec: Border.flat(Util.alpha(Color.foreground, 0.18), Style.normalBorderWidth)
-                    radius: Style.cornerRadius > 0 ? 4 : 0
-                    anchors.verticalCenter: parent.verticalCenter
+                  Row {
+                    id: modeRow
+                    width: parent.width
+                    spacing: Style.space(8)
 
                     Text {
-                      id: kbText
-                      anchors.centerIn: parent
-                      text: root.keybindings[modelData.value] ? root.keybindings[modelData.value] : "(none)"
-                      color: root.keybindings[modelData.value] ? Color.foreground : Color.muted
+                      width: Style.space(110)
+                      text: modelData.label
+                      color: modeRowWrapper.isWindowMode ? Color.muted : Color.foreground
                       font.family: Style.font.family
                       font.pixelSize: Style.font.bodySmall
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    BorderSurface {
+                      width: Style.space(210)
+                      implicitWidth: Style.space(210)
+                      implicitHeight: Style.space(28)
+                      color: Util.alpha(Color.foreground, 0.06)
+                      borderSpec: Border.flat(Util.alpha(Color.foreground, 0.18), Style.normalBorderWidth)
+                      radius: Style.cornerRadius > 0 ? 4 : 0
+                      anchors.verticalCenter: parent.verticalCenter
+
+                      Text {
+                        id: kbText
+                        anchors.centerIn: parent
+                        width: parent.width - Style.space(16)
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                        text: modeRowWrapper.isWindowMode
+                          ? "(unavailable)"
+                          : (root.keybindings[modelData.value] ? root.formatChordDisplay(root.keybindings[modelData.value]) : "(none)")
+                        color: modeRowWrapper.isWindowMode ? Color.muted : (root.keybindings[modelData.value] ? Color.foreground : Color.muted)
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.bodySmall
+                      }
+                    }
+
+                    Item { width: Style.space(4); height: 1 }
+
+                    Button {
+                      text: root.keybindings[modelData.value] ? "Change keybinding\u2026" : "Choose custom keybinding\u2026"
+                      fontSize: Style.font.caption
+                      enabled: !modeRowWrapper.isWindowMode
+                      opacity: enabled ? 1.0 : 0.4
+                      tooltipText: modeRowWrapper.isWindowMode
+                        ? "Capturing the active window only works with KDE."
+                        : (root.keybindings[modelData.value]
+                          ? "Change the custom shortcut for " + modelData.label + " (current: " + root.formatChordDisplay(root.keybindings[modelData.value]) + ")"
+                          : "Choose a custom keybinding for " + modelData.label)
+                      onClicked: if (!modeRowWrapper.isWindowMode) root.openRecorder(modelData.value)
+                    }
+
+                    Button {
+                      visible: !modeRowWrapper.isWindowMode && !!root.keybindings[modelData.value]
+                      text: "Remove"
+                      fontSize: Style.font.caption
+                      enabled: !modeRowWrapper.isWindowMode && !root.isRemovingKey
+                      opacity: enabled ? 1.0 : 0.4
+                      tooltipText: root.hasConflictResolution(modelData.value)
+                        ? "Remove shortcut and restore conflicting keybinding to its original state"
+                        : "Remove the shortcut for " + modelData.label
+                      onClicked: root.removeKeybinding(modelData.value)
                     }
                   }
 
-                  Item { width: Style.space(1); height: 1 }
-
-                  Button {
-                    text: root.keybindings[modelData.value] ? "Record\u2026" : "Record shortcut\u2026"
-                    fontSize: Style.font.caption
-                    tooltipText: root.keybindings[modelData.value]
-                      ? "Record a new shortcut for " + modelData.label + " (current: " + root.keybindings[modelData.value] + ")"
-                      : "Record a global shortcut for " + modelData.label
-                    onClicked: root.openRecorder(modelData.value)
-                  }
-
-                  Button {
-                    visible: !!root.keybindings[modelData.value]
-                    text: "Clear"
-                    fontSize: Style.font.caption
-                    tooltipText: "Remove the shortcut for " + modelData.label
-                    onClicked: {
-                      root.recordingMode = modelData.value
-                      root.applyBinding("", false)
+                  MouseArea {
+                    anchors.fill: parent
+                    visible: modeRowWrapper.isWindowMode
+                    enabled: modeRowWrapper.isWindowMode
+                    hoverEnabled: modeRowWrapper.isWindowMode
+                    cursorShape: modeRowWrapper.isWindowMode ? Qt.ForbiddenCursor : Qt.ArrowCursor
+                    PanelToolTip {
+                      visible: modeRowWrapper.isWindowMode && parent.containsMouse
+                      text: "Capturing the active window only works with KDE."
                     }
                   }
                 }
               }
-            }
-
-            Text {
-              visible: root.suggestedKeyConflict && suggestedKeyConflictMessage !== ""
-              width: parent.width
-              text: "\u26a0 " + suggestedKeyConflictMessage
-              color: Color.accent
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
             }
 
             // ===== Behaviour: app-wide switches, not per-launch flags =====
@@ -666,7 +647,7 @@ Item {
               id: daemonToggle
               width: parent.width
               label: "OCR daemon"
-              description: "Keep a ready OCR engine in the background for later launches."
+              description: "Keep ready OCR engine in background on launch (automatically exits after 15 min idle)."
               titleSize: Style.font.bodySmall
               // The knob carries the user's preference ("serve" = on), not the
               // live status: the daemon idles itself out after 15 minutes and
@@ -830,239 +811,6 @@ Item {
 
         }
       }
-
-      // =======================================================================
-      // MODAL: Record shortcut dialog with live conflict check and resolution
-      // (structure follows OmaGuake's "Record custom shortcut" modal)
-      // =======================================================================
-    Rectangle {
-      id: recordModalScrim
-      visible: root.recordingDialogOpen
-      anchors.fill: parent
-      color: Qt.rgba(0, 0, 0, 0.7)
-      radius: settingsCard.radius
-      z: 100
-
-      MouseArea {
-        anchors.fill: parent
-        onClicked: {} // swallow clicks
-      }
-
-      Rectangle {
-        id: recordCard
-        width: parent.width - Style.space(64)
-        height: recordCol.implicitHeight + Style.space(32)
-        anchors.centerIn: parent
-        radius: Style.cornerRadius > 0 ? 8 : 0
-        color: Color.background
-        border.color: Color.accent
-        border.width: 1
-
-        // Key catcher
-        Item {
-          id: recordKeyCatcher
-          anchors.fill: parent
-          focus: root.recordingDialogOpen
-          Keys.priority: Keys.BeforeItem
-
-          Keys.onPressed: function(event) {
-            if (event.key === Qt.Key_Escape) {
-              root.closeRecorder()
-              event.accepted = true
-              return
-            }
-
-            var mods = []
-            if (event.modifiers & Qt.ControlModifier) mods.push("CTRL")
-            if (event.modifiers & Qt.AltModifier) mods.push("ALT")
-            if (event.modifiers & Qt.MetaModifier) mods.push("SUPER")
-            if (event.modifiers & Qt.ShiftModifier) mods.push("SHIFT")
-
-            var isMod = event.key === Qt.Key_Control || event.key === Qt.Key_Alt ||
-                        event.key === Qt.Key_Meta || event.key === Qt.Key_Shift ||
-                        event.key === Qt.Key_Super || event.key === Qt.Key_NumLock
-            var keyStr = isMod ? "" : root.recordedKeyStr(event.key, event.text)
-
-            if (isMod) {
-              root.recordedChord = mods.join(" + ")
-              event.accepted = true
-            } else if (keyStr) {
-              var chord = (mods.length > 0 ? mods.join(" + ") + " + " : "") + keyStr
-              root.recordedChord = chord
-              root.checkRecordedKey(chord)
-              event.accepted = true
-            }
-          }
-        }
-
-        Column {
-          id: recordCol
-          anchors.fill: parent
-          anchors.margins: Style.space(16)
-          spacing: Style.space(14)
-
-          Text {
-            text: "Record shortcut" + (root.recordingMode !== "" ? " \u2014 " + root.modeName(root.recordingMode) : "")
-            font.family: Style.font.family
-            font.pixelSize: Style.font.heading
-            font.bold: true
-            color: Color.foreground
-          }
-
-          // Recording display box
-          Rectangle {
-            width: parent.width
-            height: 60
-            radius: Style.cornerRadius > 0 ? 6 : 0
-            color: Util.alpha(Color.accent, 0.08)
-            border.color: Color.accent
-            border.width: 1
-
-            Row {
-              anchors.centerIn: parent
-              spacing: Style.space(8)
-
-              Text {
-                text: root.recordedChord ? "\uf11c" : "\uf111"
-                font.family: Style.font.family
-                font.pixelSize: Style.font.title
-                color: Color.accent
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              Text {
-                text: root.recordedChord ? root.recordedChord : "Press your key combination"
-                font.family: Style.font.family
-                font.pixelSize: root.recordedChord ? Style.font.heading : Style.font.body
-                font.bold: !!root.recordedChord
-                color: root.recordedChord ? Color.foreground : Color.muted
-                anchors.verticalCenter: parent.verticalCenter
-              }
-            }
-          }
-
-          // Live conflict / availability status
-          Rectangle {
-            visible: !!root.recordedChord
-            width: parent.width
-            height: recStatusText.implicitHeight + Style.space(16)
-            radius: Style.cornerRadius > 0 ? 4 : 0
-            color: root.recordedConflict ? Util.alpha(Color.urgent, 0.15) : Util.alpha(Color.accent, 0.15)
-            border.color: root.recordedConflict ? Color.urgent : Color.accent
-            border.width: 1
-
-            Row {
-              anchors.fill: parent
-              anchors.margins: Style.space(8)
-              spacing: Style.space(8)
-
-              Text {
-                text: root.recordedConflict ? "\uf071" : "\uf00c"
-                font.family: Style.font.family
-                font.pixelSize: Style.font.body
-                color: root.recordedConflict ? Color.urgent : Color.accent
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              Text {
-                id: recStatusText
-                width: parent.width - Style.space(32)
-                text: root.isCheckingRecordedKey
-                      ? "Checking for conflicts\u2026"
-                      : (root.recordedConflict
-                         ? root.recordedConflictMessage
-                         : root.recordedChord + " is free")
-                textFormat: Text.PlainText
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
-                wrapMode: Text.WordWrap
-                color: root.recordedConflict ? Color.urgent : Color.foreground
-                anchors.verticalCenter: parent.verticalCenter
-              }
-            }
-          }
-
-          // Suggested conflict-free alternatives
-          Column {
-            visible: root.recordedConflict && root.recordedSuggestions.length > 0
-            width: parent.width
-            spacing: Style.space(6)
-
-            Text {
-              text: "Conflict-free alternatives"
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              font.bold: true
-              color: Color.foreground
-            }
-
-            Row {
-              spacing: Style.space(6)
-
-              Repeater {
-                model: root.recordedSuggestions
-
-                Button {
-                  text: modelData
-                  fontSize: Style.font.caption
-                  tooltipText: "Use " + modelData + " instead"
-                  onClicked: {
-                    root.recordedChord = modelData
-                    root.checkRecordedKey(modelData)
-                  }
-                }
-              }
-            }
-          }
-
-          // Take over the conflicting binding
-          Row {
-            visible: root.recordedConflict
-            width: parent.width
-            spacing: Style.space(8)
-
-            Text {
-              text: "The key is bound elsewhere."
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              color: Color.muted
-              anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Button {
-              text: "Take over (disable conflicting binding)"
-              fontSize: Style.font.caption
-              tooltipText: "Comment out the conflicting Hyprland binding and assign this key to LumineCapture"
-              onClicked: root.applyBinding(root.recordedChord, true)
-            }
-          }
-
-          // Actions
-          Row {
-            anchors.right: parent.right
-            spacing: Style.spacing.sm
-
-            Button {
-              id: recCancelBtn
-              width: Math.max(recApplyBtn.implicitWidth, Style.space(120))
-              text: "Cancel"
-              onClicked: root.closeRecorder()
-            }
-
-            Button {
-              id: recApplyBtn
-              width: Math.max(implicitWidth, Style.space(120))
-              text: "Apply"
-              selected: true
-              enabled: !!root.recordedChord && !root.recordedConflict && !root.isCheckingRecordedKey
-              opacity: enabled ? 1.0 : 0.4
-              onClicked: root.applyBinding(root.recordedChord, false)
-            }
-          }
-        }
-      }
-      }
-      }
     }
 
     // =======================================================================
@@ -1158,65 +906,106 @@ Item {
       }
     }
 
+    // =======================================================================
+    // MODAL: Record shortcut dialog with live conflict check and resolution
+    // Sits at top-level overlayWindow, covering screen with proper dialog size
+    // =======================================================================
+    LocalUi.KeybindingDialog {
+      id: kbDialog
+      targetWindow: overlayWindow
+      dialogOpen: root.recordingDialogOpen
+      mode: root.recordingMode
+      modeLabel: root.modeName(root.recordingMode)
+      currentChord: root.keybindings[root.recordingMode] || ""
+      conflictCheckerScript: configManager ? configManager.conflictCheckerScript : ""
+      argsByMode: configManager ? configManager.perModeArgs : ({})
+      hasPriorConflict: root.hasConflictResolution(root.recordingMode)
+      priorConflictOwner: root.hasConflictResolution(root.recordingMode) && configManager && configManager.conflictResolutions[root.recordingMode] ? configManager.conflictResolutions[root.recordingMode].owner : ""
+      priorConflictChord: root.hasConflictResolution(root.recordingMode) && configManager && configManager.conflictResolutions[root.recordingMode] ? (configManager.conflictResolutions[root.recordingMode].original_chord || configManager.conflictResolutions[root.recordingMode].target_chord) : ""
+      onApplied: function(res) {
+        root.recordingDialogOpen = false
+        if (res && res.keybindings) {
+          root.keybindings = root.copyKeybindings(res.keybindings)
+        }
+        if (configManager && res) {
+          configManager.saveSettings({
+            keybindings: res.keybindings || root.keybindings,
+            conflictResolutions: res.conflict_resolutions || res.conflictResolutions || {}
+          })
+        }
+        root.statusText = res.message || "Keybinding updated."
+        Qt.callLater(function() { panelKeyCatcher.forceActiveFocus() })
+      }
+      onCancelled: function() {
+        root.recordingDialogOpen = false
+        Qt.callLater(function() { panelKeyCatcher.forceActiveFocus() })
+      }
+    }
+  }
+
   // =========================================================================
   // Background work: status, key checks, applying the map, zenity lookup,
   // the OCR daemon, and the debounced re-apply of the shortcut.
   // =========================================================================
   Process {
     id: statusProc
-    stdout: StdioCollector { id: statusOut }
-    onExited: function(code) {
-      try {
-        var s = JSON.parse(statusOut.text)
-        root.suggestedKeyConflict = s.suggested_key_conflict === true
-        root.suggestedKeyConflictMessage = s.suggested_key_conflict_message || ""
-      } catch (e) {
-        root.suggestedKeyConflict = false
-        root.suggestedKeyConflictMessage = ""
+    stdout: StdioCollector {
+      id: statusOut
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          if (!text) return
+          var idx = text.indexOf("{")
+          var jsonStr = idx >= 0 ? text.substring(idx) : text
+          var s = JSON.parse(jsonStr)
+          if (s && s.keybindings) {
+            root.keybindings = root.copyKeybindings(s.keybindings)
+          }
+        } catch (e) {
+        }
       }
     }
   }
 
   Process {
-    id: keyCheckProc
-    stdout: StdioCollector { id: keyCheckOut }
-    onExited: function(code) {
-      root.isCheckingRecordedKey = false
-      try {
-        var s = JSON.parse(keyCheckOut.text)
-        root.recordedConflict = s.conflict === true
-        root.recordedConflictMessage = s.message || s.conflict_message || ""
-        root.recordedSuggestions = s.suggestions || []
-      } catch (e) {
-        root.recordedConflict = false
-        root.recordedConflictMessage = ""
-        root.recordedSuggestions = []
+    id: removeProc
+    stdout: StdioCollector {
+      id: removeOut
+      waitForEnd: true
+      onStreamFinished: {
+        root.isRemovingKey = false
+        try {
+          if (!text) return
+          var idx = text.indexOf("{")
+          var jsonStr = idx >= 0 ? text.substring(idx) : text
+          var res = JSON.parse(jsonStr)
+          if (res && res.success === true) {
+            if (res.keybindings) {
+              root.keybindings = root.copyKeybindings(res.keybindings)
+            }
+            if (configManager) {
+              configManager.saveSettings({
+                keybindings: res.keybindings || root.keybindings,
+                conflictResolutions: res.conflict_resolutions || res.conflictResolutions || {}
+              })
+            }
+            root.statusText = res.message || "Keybinding removed."
+          } else {
+            root.statusText = (res && res.error) ? res.error : "Could not remove keybinding."
+          }
+        } catch (e) {
+          root.statusText = "Error removing keybinding."
+        }
       }
+    }
+    onExited: function(code) {
+      root.isRemovingKey = false
     }
   }
 
   Process {
-    id: applyProc
-    stdout: StdioCollector { id: applyOut }
-    onExited: function(code) {
-      var r = null
-      try { r = JSON.parse(applyOut.text) } catch (e) { r = null }
-      var ok = code === 0 && r && r.success === true
-      if (root.silentReapply) {
-        root.silentReapply = false
-        return
-      }
-      if (ok) {
-        // The record dialog closes itself once the chord is in.
-        if (root.recordingDialogOpen) root.closeRecorder()
-        root.statusText = root.lastAppliedChord === ""
-            ? "Keybinding removed."
-            : "Keybinding applied: " + root.lastAppliedChord + " (" + root.modeName(root.recordingMode) + ")"
-        root.refreshStatus()
-      } else {
-        root.statusText = (r && r.error) ? r.error : "Could not apply the keybinding."
-      }
-    }
+    id: syncProc
+    stdout: StdioCollector { id: syncOut; waitForEnd: true }
   }
 
   Timer {
@@ -1228,7 +1017,7 @@ Item {
   Process {
     id: checkZenityProc
     command: ["/usr/bin/which", "zenity"]
-    stdout: StdioCollector { id: checkZenityOut }
+    stdout: StdioCollector { id: checkZenityOut; waitForEnd: true }
     onExited: function(code) {
       // 2nd arg of onExited is the exit status, not stdout; captured text
       // needs a StdioCollector on the stdout property (see themeSyncProc).
@@ -1257,7 +1046,7 @@ Item {
 
   Process {
     id: browseProc
-    stdout: StdioCollector { id: browseOut }
+    stdout: StdioCollector { id: browseOut; waitForEnd: true }
     onExited: function(code) {
       var path = String(browseOut.text).trim()
       if (code === 0 && path !== "") root.setOutputText(path)
@@ -1267,7 +1056,7 @@ Item {
 
   Process {
     id: ocrProc
-    stdout: StdioCollector { id: ocrOut }
+    stdout: StdioCollector { id: ocrOut; waitForEnd: true }
     onExited: function(code) {
       root.ocrBusy = false
       // serve/stop/calibrate move the daemon, so the truth comes from status.
@@ -1283,7 +1072,7 @@ Item {
     // onExited(code, exitStatus): the 2nd arg is the process's exit-status
     // number, NOT stdout; captured text needs a StdioCollector on the stdout
     // property (see themeSyncProc in ConfigManager.qml).
-    stdout: StdioCollector { id: ocrStatusOut }
+    stdout: StdioCollector { id: ocrStatusOut; waitForEnd: true }
     onExited: function (code) {
       root.applyOcrStatus(code, String(ocrStatusOut.text))
     }

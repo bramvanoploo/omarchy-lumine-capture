@@ -116,23 +116,46 @@ PopupCard {
       Repeater {
         model: LaunchArgs.MODES
 
-        Button {
-          id: modeBtn
+        Item {
+          id: modeBtnWrapper
           required property var modelData
-          // Fixed size: the row width binds off the delegates, so deriving the
-          // button width from the row would be a binding loop (zero widths).
+          readonly property bool isWindowMode: modelData.value === "window"
+
           width: modeBtnWidth
           height: modeBtnHeight
-          horizontalPadding: 0
-          verticalPadding: 0
-          // Icon glyphs come from the bar's icon font.
-          fontFamily: root.bar && root.bar.fontFamily ? root.bar.fontFamily : Style.font.family
-          iconText: root.modeIconGlyphs[modelData.value] || "\uf030"
-          iconSize: Math.round(Style.bar.iconFont * 1.4)
-          foreground: root.chords[modelData.value] ? Color.foreground : Util.alpha(Color.foreground, 0.55)
-          tooltipText: modelData.label + " — " + (root.modeHints[modelData.value] || "")
-            + (root.chords[modelData.value] ? "\nShortcut: " + root.chords[modelData.value] : "\nNo shortcut")
-          onClicked: root.picked(modelData.value)
+          opacity: isWindowMode ? 0.45 : 1.0
+
+          Button {
+            id: modeBtn
+            anchors.fill: parent
+            enabled: !modeBtnWrapper.isWindowMode
+            horizontalPadding: 0
+            verticalPadding: 0
+            // Icon glyphs come from the bar's icon font.
+            fontFamily: root.bar && root.bar.fontFamily ? root.bar.fontFamily : Style.font.family
+            iconText: root.modeIconGlyphs[modelData.value] || "\uf030"
+            iconSize: Math.round(Style.bar.iconFont * 1.4)
+            foreground: modeBtnWrapper.isWindowMode
+              ? Color.muted
+              : (root.chords[modelData.value] ? Color.foreground : Util.alpha(Color.foreground, 0.55))
+            tooltipText: modeBtnWrapper.isWindowMode
+              ? ""
+              : (modelData.label + " — " + (root.modeHints[modelData.value] || "")
+                + (root.chords[modelData.value] ? "\nShortcut: " + root.chords[modelData.value] : "\nNo shortcut"))
+            onClicked: if (!modeBtnWrapper.isWindowMode) root.picked(modelData.value)
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            visible: modeBtnWrapper.isWindowMode
+            enabled: modeBtnWrapper.isWindowMode
+            hoverEnabled: modeBtnWrapper.isWindowMode
+            cursorShape: modeBtnWrapper.isWindowMode ? Qt.ForbiddenCursor : Qt.ArrowCursor
+            PanelToolTip {
+              visible: modeBtnWrapper.isWindowMode && parent.containsMouse
+              text: "Capturing the active window only works with KDE."
+            }
+          }
         }
       }
     }

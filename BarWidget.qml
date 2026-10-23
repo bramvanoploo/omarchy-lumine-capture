@@ -30,6 +30,7 @@ BarWidget {
 
   Component.onCompleted: {
     checkInstalledProc.running = true
+    reapplyTimer.restart()
   }
 
   Process {
@@ -73,6 +74,7 @@ BarWidget {
   // "" means the mode from the launch options — the legacy entry points
   // (bar keyboard, IPC) keep honoring the Mode setting.
   function launchCapture(mode) {
+    if (mode === "window") return
     if (launchProc.running) return
     var args = (mode === undefined || mode === "")
       ? config.launchArgs
@@ -82,6 +84,7 @@ BarWidget {
   }
 
   function checkAndOpen(mode) {
+    if (mode === "window") return
     if (root.isInstalling) return
     if (root.isInstalled) {
       root.launchCapture(mode)

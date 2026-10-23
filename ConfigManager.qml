@@ -10,7 +10,7 @@ QtObject {
 
   property string pluginDir: ""
   readonly property string homeDir: Quickshell.env("HOME") || ""
-  property string version: "0.4.0"
+  property string version: "0.5.0"
   readonly property string pluginId: "bramvanoploo.omarchy-lumine-capture"
   readonly property string configPath: (homeDir ? homeDir : "~") + "/.config/omarchy/plugins/" + pluginId + "/settings.json"
   readonly property string conflictCheckerScript: pluginDir + "/scripts/conflict-checker.py"
@@ -18,11 +18,30 @@ QtObject {
   readonly property string themeSyncScript: pluginDir + "/scripts/sync-theme.py"
   readonly property string themeNameFile: (homeDir ? homeDir : "~") + "/.local/state/omarchy/current/theme.name"
 
+  // Shipped defaults applied on first run:
+  function defaultKeybindings() {
+    return {
+      "": "SUPER + BACKSLASH",
+      "full": "SUPER + BRACKETRIGHT",
+      "window": "",
+      "region": "SUPER + BRACKETLEFT",
+      "region-ocr": "SUPER + SHIFT + BRACKETLEFT"
+    }
+  }
+
   // One global shortcut per capture mode; the keys are the mode values of
   // LaunchArgs.MODES, "" is the editor. "" = that mode has no shortcut.
   // The old single "keybinding" setting is migrated to the editor mode.
-  // There is no shipped default: the user records their own after installing.
-  property var keybindings: ({ "": "", "full": "", "window": "", "region": "", "region-ocr": "" })
+  property var keybindings: ({
+    "": "SUPER + BACKSLASH",
+    "full": "SUPER + BRACKETRIGHT",
+    "window": "",
+    "region": "SUPER + BRACKETLEFT",
+    "region-ocr": "SUPER + SHIFT + BRACKETLEFT"
+  })
+  // Tracks any keybinding conflicts resolved by taking over or reassigning
+  // an existing shortcut, mapped by mode: { [mode]: { target_chord, owner, owner_scope, original_chord, action_type, reassigned_chord, ... } }
+  property var conflictResolutions: ({})
 
   // One property per lumine-capture command line option the panel exposes.
   // LaunchArgs.js is what turns them into arguments, and reads them back.
@@ -60,11 +79,17 @@ QtObject {
     return base + "/" + dir
   }
 
+  readonly property string effectiveTo: {
+    if (to !== "") return to
+    if (appTo !== "") return appTo
+    return "cs"
+  }
+
   readonly property var built: LaunchArgs.buildArgs({
     mode: mode,
     monitor: monitor,
     delay: delay,
-    to: to,
+    to: toNothing ? "" : effectiveTo,
     toNothing: toNothing,
     output: expandedOutput,
     nonotify: nonotify,
@@ -82,11 +107,12 @@ QtObject {
   readonly property var perModeArgs: buildPerModeArgs()
 
   function buildPerModeArgs() {
+    var effTo = toNothing ? "" : effectiveTo
     var opts = {
       mode: mode,
       monitor: monitor,
       delay: delay,
-      to: to,
+      to: effTo,
       toNothing: toNothing,
       output: expandedOutput,
       nonotify: nonotify,
@@ -117,7 +143,7 @@ QtObject {
   property var _themeSyncProc: Process {
     id: themeSyncProc
     command: ["true"]
-    stdout: StdioCollector { id: themeSyncOut }
+    stdout: StdioCollector { id: themeSyncOut; waitForEnd: true }
     onExited: function(code) {
       var res = null
       try { res = JSON.parse(themeSyncOut.text) } catch (e) {}
@@ -174,6 +200,14 @@ QtObject {
       } else if (data.keybinding !== undefined) {
         // Pre-per-mode settings: the one shortcut belonged to the editor.
         keybindings = normalizeKeybindings({ "": String(data.keybinding) })
+      } else {
+        keybindings = defaultKeybindings()
+        saveSettings({ keybindings: keybindings })
+      }
+      if (data.conflictResolutions !== undefined && typeof data.conflictResolutions === "object" && data.conflictResolutions !== null) {
+        conflictResolutions = data.conflictResolutions
+      } else {
+        conflictResolutions = ({})
       }
 
       var keys = optionKeys()
@@ -214,21 +248,24 @@ QtObject {
   }
 
   function applyDefaults() {
-    keybindings = ({ "": "", "full": "", "window": "", "region": "", "region-ocr": "" })
+    keybindings = defaultKeybindings()
+    conflictResolutions = ({})
     mode = ""
     monitor = false
-    delay = ""
-    to = ""
+    delay = "0"
+    to = appTo ? appTo : "cs"
     toNothing = false
     output = ""
     nonotify = false
-    ocrDaemon = ""
+    ocrDaemon = "serve"
     extraArgs = ""
+    settingsFile.setText(JSON.stringify(settingsObject(), null, 2) + "\n")
   }
 
   function settingsObject() {
     return {
       keybindings: keybindings,
+      conflictResolutions: conflictResolutions,
       mode: mode,
       monitor: monitor,
       delay: delay,
@@ -244,6 +281,7 @@ QtObject {
   function saveSettings(obj) {
     obj = obj || {}
     if (obj.keybindings !== undefined) keybindings = normalizeKeybindings(obj.keybindings)
+    if (obj.conflictResolutions !== undefined) conflictResolutions = obj.conflictResolutions
     if (obj.mode !== undefined) mode = String(obj.mode)
     if (obj.monitor !== undefined) monitor = (obj.monitor === true)
     if (obj.delay !== undefined) setDelay(obj.delay)

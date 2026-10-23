@@ -16,7 +16,13 @@ No manual setup required: clicking the bar icon will guide you through installin
 
 - **Status bar icon** (camera). **Left-click** starts a capture; **right-click** opens the configuration panel.
 - **Automatic dependency install**: if `lumine-capture-bin` (AUR) is not installed, a confirmation dialog offers to install it. If the AUR helper `yay` is missing, it is explained and installed first. Installation runs in a terminal with `--noconfirm`.
-- **Global keybindings, one per capture mode, no shipped default**: you record your own chords in Settings after installing. Conflict checking against Hyprland bindings: on conflict, pick a suggested free chord or take over (the conflicting binding is disabled with a comment).
+- **Global keybindings, one per capture mode, no shipped defaults**: customize your shortcuts in Settings without default chords applied automatically.
+  - **Live conflict detection & resolution**: if a chosen shortcut is already in use, you are warned and offered three resolution paths:
+    1. Change your keybinding (with suggested free alternatives).
+    2. Change the conflicting keybinding (reassign it to suggested free alternatives).
+    3. Take over the keybinding without assigning a new binding to the conflicting functionality.
+  - **Removable shortcuts with automatic conflict restoration**: remove buttons are shown only for applied shortcuts, and removing a shortcut automatically resets any conflict resolution back to its original state.
+  - **Reset offer when re-customizing**: if you change a keybinding that previously resolved a conflict, you are offered the option to restore the originally conflicting shortcut to its previous state.
 - **Right-click settings panel**: keybinding (record, clear, conflict resolution) and a control for every launch option below.
 - **Theme sync**: LumineCapture's colors follow the Omarchy theme you have selected, and are rewritten when the theme changes.
 
